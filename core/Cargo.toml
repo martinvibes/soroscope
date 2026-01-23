@@ -6,3 +6,6 @@ edition = "2021"
 [dependencies]
 soroban-sdk = "22.0.0" # Adjust to the latest compatible version
 tokio = { version = "1", features = ["full"] }
+axum = "0.7"
+thiserror = "1.0"
+serde = { version = "1.0", features = ["derive"] }
