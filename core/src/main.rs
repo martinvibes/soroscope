@@ -1,13 +1,49 @@
+mod benchmarks;
 mod errors;
 
 use crate::errors::AppError;
 use axum::{routing::get, Router};
+use std::env;
+use std::path::PathBuf;
 
 #[tokio::main]
 async fn main() {
+    // CLI Argument Handling
+    let args: Vec<String> = env::args().collect();
+    if args.len() > 1 && args[1] == "benchmark" {
+        println!("Starting SoroScope Benchmark...");
+        // Locate WASM - assuming running from workspace root or core
+        // Attempt to find it relative to current directory or know location
+        let possible_paths = vec![
+            "target/wasm32-unknown-unknown/release/soroban_token_contract.wasm",
+            "../target/wasm32-unknown-unknown/release/soroban_token_contract.wasm",
+        ];
+
+        let mut wasm_path = None;
+        for p in possible_paths {
+            let path = PathBuf::from(p);
+            if path.exists() {
+                wasm_path = Some(path);
+                break;
+            }
+        }
+
+        if let Some(path) = wasm_path {
+            if let Err(e) = benchmarks::run_token_benchmark(path) {
+                eprintln!("Benchmark failed: {}", e);
+            }
+        } else {
+            eprintln!("Could not find soroban_token_contract.wasm. Make sure to build the contract first.");
+        }
+        return;
+    }
+
+    // Default Web Server
+    println!("SoroScope CLI Initialized. Run with 'benchmark' argument to profile token contract.");
+    
     // build our application with a single route
     let app = Router::new()
-        .route("/", get(|| async { "Hello, World!" }))
+        .route("/", get(|| async { "Hello from SoroScope! Usage: cargo run -p soroscope-core -- benchmark" }))
         .route(
             "/error",
             get(|| async { Err::<&str, AppError>(AppError::BadRequest("Test error".to_string())) }),
