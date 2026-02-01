@@ -43,12 +43,31 @@ As a project in the **Stellar Wave Program**, we value collaboration and clear c
 - Use **Soroban SDK v22.0.0** or higher.
 - Avoid deprecated methods like `register_contract` (use `register` instead).
 
+## 🐛 Reporting Issues
+
+If you find a bug or have a feature request, please search existing [Issues](https://github.com/SoroLabs/soroscope/issues) first. 
+
+### Bug Reports
+When opening a bug report, please include:
+- A clear, descriptive title.
+- Steps to reproduce the issue.
+- Your environment details (OS, Node version, Rust version).
+- Expected vs. actual behavior.
+
+### Feature Requests
+We love fresh ideas! Please describe the use case and why this feature would be valuable for Soroban developers.
+
 ## 📮 Pull Request Process
 
-1.  **Branch Name**: Use clear prefixes like `feat/`, `fix/`, or `docs/`.
-2.  **Focus**: Keep PRs small and focused on a single change.
-3.  **CI**: All PRs must pass automated builds and tests.
-4.  **Documentation**: Update the `README.md` or this guide if you change the project structure or contribution workflow.
+We follow a typical GitHub Fork-and-Pull workflow:
+
+1.  **Fork** the repository and create your branch from `main`.
+2.  **Sync**: Ensure your branch is up to date with the upstream `main`.
+3.  **Local Checks**: Before submitting, ensure your code is clean:
+    - `cargo fmt` and `cargo test` (for backend/contracts)
+    - `npm run lint` (inside the `/web` folder)
+4.  **Describe**: In your PR description, explain *what* changed and *why*. Link to any related issues.
+5.  **Review**: At least one maintainer will review your PR. Please address any feedback promptly.
 
 ## 🤝 Questions or Feedback?
 Feel free to open an **Issue** or reach out to the **SoroLabs** team. Let's build the best Soroban developer tools together!

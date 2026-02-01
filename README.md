@@ -33,23 +33,16 @@ cd soroscope
 
 The **core** crate is a Rust binary that will power SoroScope's resource profiling.
 
-### Build
+### Build & Run
 ```bash
+# Build the binary
 cargo build -p soroscope-core
+
+# Run the server (RUST_LOG=info is required to see API logs)
+RUST_LOG=info cargo run -p soroscope-core
 ```
 
-### Run
-```bash
-cargo run -p soroscope-core
-```
-
-You should see:
-
-```text
-SoroScope CLI Initialized
-```
-
-This will evolve into a full resource-profiler CLI for Soroban contracts.
+The server listens on `http://localhost:8080` by default.
 
 ---
 
@@ -81,12 +74,14 @@ npm start
 
 ## 📦 Contracts (`/contracts`)
 
-This folder will contain sample Soroban contracts used to:
-- Benchmark typical workloads
-- Compare different implementation strategies
-- Validate SoroScope's profiling output
+This folder contains sample Soroban contracts. To build them for analysis:
 
-You can add your own contracts here and wire them into the CLI + dashboard.
+```bash
+# Build all contracts to WASM
+cargo build --target wasm32-unknown-unknown --release
+```
+
+The resulting `.wasm` files will be located in `target/wasm32-unknown-unknown/release/`. You can upload these to the Web Dashboard for profiling.
 
 ---
 
