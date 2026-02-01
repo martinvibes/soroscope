@@ -12,7 +12,6 @@ Building on Soroban requires careful resource management. SoroScope provides a "
 - `/core`: Rust-based CLI for simulating and profiling contracts.
 - `/web`: Next.js + Tailwind CSS dashboard for visualizing resource heatmaps.
 - `/contracts`: Sample Soroban contracts used for benchmarking.
-- `/docs`: Additional documentation and design notes.
 - `/.github/workflows`: CI/CD pipelines.
 
 ## ⚙️ Getting Started
@@ -91,15 +90,11 @@ You can add your own contracts here and wire them into the CLI + dashboard.
 
 ---
 
-## 📚 Documentation (`/docs`)
 
-Additional design docs, ADRs, and deep-dive explanations about how SoroScope collects and interprets resource data will live in `/docs`.
 
----
-
-## 📅 Roadmap (Drips Wave Jan 21')
-- **Phase 1:** Core CLI engine for resource extraction.
-- **Phase 2:** Visual resource heatmap for Rust functions.
+## 📅 Roadmap (2026)
+- **Phase 1 [COMPLETED]:** Core CLI engine for resource extraction.
+- **Phase 2 [IN PROGRESS]:** Integration of Frontend dashboard with Backend simulation engine.
 - **Phase 3:** Automated optimization recommendations.
 
 ---
