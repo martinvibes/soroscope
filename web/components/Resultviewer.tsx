@@ -90,41 +90,7 @@ export function ResultViewer({ result }: ResultViewerProps) {
         )
       )}
 
-      {result.resourceCost && (
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: '1fr 1fr',
-            gap: '12px',
-            fontSize: '13px',
-          }}
-        >
-          <div
-            style={{
-              backgroundColor: '#0d1117',
-              padding: '12px',
-              borderRadius: '6px',
-              border: '1px solid #30363d',
-            }}
-          >
-            <strong style={{ color: '#00d9ff' }}>Fee:</strong>
-            <p style={{ margin: '4px 0 0 0', color: '#8b949e' }}>{result.resourceCost.fee} XLM</p>
-          </div>
-          <div
-            style={{
-              backgroundColor: '#0d1117',
-              padding: '12px',
-              borderRadius: '6px',
-              border: '1px solid #30363d',
-            }}
-          >
-            <strong style={{ color: '#00d9ff' }}>Instructions:</strong>
-            <p style={{ margin: '4px 0 0 0', color: '#8b949e' }}>
-              {result.resourceCost.instructions}
-            </p>
-          </div>
-        </div>
-      )}
+
     </div>
   );
 }

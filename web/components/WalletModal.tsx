@@ -1,4 +1,5 @@
 "use client";
+import Image from "next/image";
 
 import { useWallet } from "../context/WalletContext";
 import { motion, AnimatePresence } from "framer-motion";
@@ -72,23 +73,24 @@ export function WalletModal() {
               <div className="flex flex-col gap-3 w-full mb-6">
                 {supportedWallets.map((wallet) => {
                   const isSelected = activeSelection === wallet.id;
+
+
+
                   return (
                     <button
                       key={wallet.id}
                       onClick={() => setActiveSelection(wallet.id)}
-                      className={`flex items-center gap-4 w-full p-4 rounded-xl transition-all border ${
-                        isSelected
-                          ? "bg-[#1a2333] border-[#33C5E0]/30"
-                          : "bg-transparent border-[#2A3338] hover:bg-[#1a2333] hover:border-[#33C5E0]/20"
-                      }`}
+                      className={`flex items-center gap-4 w-full p-4 rounded-xl transition-all border ${isSelected
+                        ? "bg-[#1a2333] border-[#33C5E0]/30"
+                        : "bg-transparent border-[#2A3338] hover:bg-[#1a2333] hover:border-[#33C5E0]/20"
+                        }`}
                     >
                       {/* Radio Circle */}
                       <div
-                        className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${
-                          isSelected
-                            ? "border-[#33C5E0] bg-[#33C5E0]"
-                            : "border-[#2d3b4f]"
-                        }`}
+                        className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${isSelected
+                          ? "border-[#33C5E0] bg-[#33C5E0]"
+                          : "border-[#2d3b4f]"
+                          }`}
                       >
                         {isSelected && (
                           <Check
@@ -100,7 +102,13 @@ export function WalletModal() {
 
                       {/* Icon */}
                       <div className="text-[#92A5A8]">
-                        <Wallet className="w-5 h-5" />
+                        <Image
+                          src={wallet.icon}
+                          alt={wallet.name}
+                          width={20}
+                          height={20}
+                          className="object-contain"
+                        />
                       </div>
 
                       <span className="font-medium text-white text-left flex-1">
@@ -114,11 +122,10 @@ export function WalletModal() {
               <button
                 onClick={handleConnectClick}
                 disabled={!activeSelection || isConnecting}
-                className={`w-full py-3 rounded-xl font-medium transition-all flex items-center justify-center gap-2 ${
-                  activeSelection && !isConnecting
-                    ? "bg-[#33C5E0] hover:bg-[#33C5E0]/90 text-black"
-                    : "bg-[#2A3338] cursor-not-allowed text-gray-500"
-                }`}
+                className={`w-full py-3 rounded-xl font-medium transition-all flex items-center justify-center gap-2 ${activeSelection && !isConnecting
+                  ? "bg-[#33C5E0] hover:bg-[#33C5E0]/90 text-black"
+                  : "bg-[#2A3338] cursor-not-allowed text-gray-500"
+                  }`}
               >
                 <UserIcon />
                 <span>{isConnecting ? "Connecting..." : "Connect Wallet"}</span>

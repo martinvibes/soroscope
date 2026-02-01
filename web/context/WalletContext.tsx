@@ -63,11 +63,11 @@ export const WalletProvider = ({ children }: { children: React.ReactNode }) => {
   }, []);
 
   const supportedWallets = [
-    { id: "freighter", name: "Freighter", icon: "/icons/freighter.png" },
-    { id: "albedo", name: "Albedo", icon: "/icons/albedo.png" },
-    { id: "xbull", name: "xBull", icon: "/icons/xbull.png" },
-    { id: "rabet", name: "Rabet", icon: "/icons/rabet.png" },
-    { id: "lobstr", name: "Lobstr", icon: "/icons/lobstr.png" },
+    { id: "freighter", name: "Freighter", icon: "https://stellar.creit.tech/wallet-icons/freighter.png" },
+    { id: "albedo", name: "Albedo", icon: "https://stellar.creit.tech/wallet-icons/albedo.png" },
+    { id: "xbull", name: "xBull", icon: "https://stellar.creit.tech/wallet-icons/xbull.png" },
+    { id: "rabet", name: "Rabet", icon: "https://stellar.creit.tech/wallet-icons/rabet.png" },
+    { id: "lobstr", name: "Lobstr", icon: "https://stellar.creit.tech/wallet-icons/lobstr.png" },
   ];
 
   const connectWallet = async (moduleId: string) => {
