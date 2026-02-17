@@ -1,0 +1,27 @@
+# 🌟 Good First Issues (Contracts)
+
+We have created specific **Structured Issues** for you to tackle! Each issue contains a detailed Summary, Motivation, and Scope.
+
+Click on any of the links below to get started.
+
+| Issue | Difficulty | Labels |
+| :--- | :--- | :--- |
+| [**#41 docs: Add Rustdoc to Liquidity Pool**](https://github.com/SoroLabs/soroscope/issues/41) | 🟢 Easy | `documentation`, `good first issue` |
+| [**#42 test: Add Zero-Amount Deposit Test**](https://github.com/SoroLabs/soroscope/issues/42) | 🟢 Easy | `testing`, `good first issue` |
+| [**#43 refactor: Use 'const' for Error Codes**](https://github.com/SoroLabs/soroscope/issues/43) | 🟢 Easy | `refactoring`, `good first issue` |
+| [**#44 test: Verify Event Emission in Token Contract**](https://github.com/SoroLabs/soroscope/issues/44) | 🟢 Easy | `testing`, `good first issue` |
+| [**#45 feat: Implement 'approve' in Liquidity Pool**](https://github.com/SoroLabs/soroscope/issues/45) | 🟡 Medium | `enhancement`, `defi` |
+| [**#46 feat: Implement 'transfer_from' in Liquidity Pool**](https://github.com/SoroLabs/soroscope/issues/46) | 🟡 Medium | `enhancement`, `defi` |
+| [**#47 feat: Add 'burn' to Liquidity Pool**](https://github.com/SoroLabs/soroscope/issues/47) | 🟡 Medium | `enhancement`, `defi` |
+| [**#48 feat: Add Pausable Functionality**](https://github.com/SoroLabs/soroscope/issues/48) | 🟡 Medium | `enhancement`, `security` |
+| [**#49 feat: Admin Fee Control**](https://github.com/SoroLabs/soroscope/issues/49) | 🔴 Hard | `enhancement`, `advanced` |
+| [**#50 test: Fuzz Testing for Swap Formula**](https://github.com/SoroLabs/soroscope/issues/50) | 🔴 Hard | `testing`, `advanced` |
+
+## 🚀 How to Start Contributing
+
+1.  Click the issue link above.
+2.  Read the **Summary**, **Motivation**, and **Scope**.
+3.  Comment **"I'd like to work on this!"** to get assigned.
+4.  Fork the repo, implement the fix, and open a PR!
+
+Happy coding! 🦀
