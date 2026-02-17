@@ -11,3 +11,5 @@ When opening a bug report, please include:
 
 ## 💡 Feature Requests
 We love fresh ideas! Please describe the use case and why this feature would be valuable for Soroban developers.
+
+
