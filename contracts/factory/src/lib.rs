@@ -1,5 +1,7 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, contracttype, Address, BytesN, Env, IntoVal, xdr::ToXdr};
+use soroban_sdk::{
+    contract, contractimpl, contracttype, xdr::ToXdr, Address, BytesN, Env, IntoVal,
+};
 
 #[contracttype]
 pub enum DataKey {
@@ -27,21 +29,31 @@ impl LiquidityPoolFactory {
         };
 
         // 2. check if pair already exists
-        if env.storage().persistent().has(&DataKey::Pair(token_0.clone(), token_1.clone())) {
-             panic!("Pair already exists");
+        if env
+            .storage()
+            .persistent()
+            .has(&DataKey::Pair(token_0.clone(), token_1.clone()))
+        {
+            panic!("Pair already exists");
         }
 
         // 3. Deploy the contract using the Salt
         // We use the pair (token_0, token_1) as entropy for the salt to ensure deterministic addresses
-        let salt = env.crypto().sha256(&(token_0.clone(), token_1.clone()).to_xdr(&env));
-        
+        let salt = env
+            .crypto()
+            .sha256(&(token_0.clone(), token_1.clone()).to_xdr(&env));
+
         // 4. Initialize the deployed contract
         let deployed_address = env.deployer().with_current_contract(salt).deploy(wasm_hash);
 
         // We need to call the `initialize` function on the new contract.
         // Assuming the LP contract has `fn initialize(e: Env, token_a: Address, token_b: Address)`
         // We use Val::from_void() as a placeholder if types are tricky, but here we need Address.
-        let init_args = soroban_sdk::vec![&env, token_0.clone().into_val(&env), token_1.clone().into_val(&env)];
+        let init_args = soroban_sdk::vec![
+            &env,
+            token_0.clone().into_val(&env),
+            token_1.clone().into_val(&env)
+        ];
 
         // Invoke the initialize function. Symbol::new(&env, "initialize")
         let _res: () = env.invoke_contract(
@@ -51,10 +63,9 @@ impl LiquidityPoolFactory {
         );
 
         // 5. Store the pair mapping
-        env.storage().persistent().set(
-            &DataKey::Pair(token_0, token_1),
-            &deployed_address
-        );
+        env.storage()
+            .persistent()
+            .set(&DataKey::Pair(token_0, token_1), &deployed_address);
 
         deployed_address
     }
@@ -66,8 +77,10 @@ impl LiquidityPoolFactory {
         } else {
             (token_b, token_a)
         };
-        
-        env.storage().persistent().get(&DataKey::Pair(token_0, token_1))
+
+        env.storage()
+            .persistent()
+            .get(&DataKey::Pair(token_0, token_1))
     }
 }
 

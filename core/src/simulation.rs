@@ -58,8 +58,6 @@ pub struct SorobanResources {
     pub transaction_size_bytes: u64,
 }
 
-
-
 /// Complete simulation result including resources and metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SimulationResult {

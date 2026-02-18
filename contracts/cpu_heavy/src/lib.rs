@@ -12,10 +12,11 @@ const MAX_LOOP_OPS: u32 = 500_000;
 
 #[contractimpl]
 impl CpuHeavyContract {
-    
     pub fn fibonacci_iterative(_env: Env, n: u32) -> u64 {
-        if n > MAX_FIB { panic!("input too large"); } 
-        
+        if n > MAX_FIB {
+            panic!("input too large");
+        }
+
         let mut a: u64 = 0;
         let mut b: u64 = 1;
         for _ in 0..n {
@@ -27,8 +28,10 @@ impl CpuHeavyContract {
     }
 
     pub fn bubble_sort(_env: Env, values: Vec<u32>) -> Vec<u32> {
-        if values.len() > MAX_SORT { panic!("list too long"); } 
-        
+        if values.len() > MAX_SORT {
+            panic!("list too long");
+        }
+
         let mut arr = values;
         let n = arr.len();
         for i in 0..n {
@@ -45,8 +48,10 @@ impl CpuHeavyContract {
     }
 
     pub fn count_primes(_env: Env, limit: u32) -> u32 {
-        if limit > MAX_PRIME { panic!("limit too large"); } 
-        
+        if limit > MAX_PRIME {
+            panic!("limit too large");
+        }
+
         let mut count = 0;
         for num in 2..=limit {
             let mut is_prime = true;
@@ -58,7 +63,9 @@ impl CpuHeavyContract {
                 }
                 i += 1;
             }
-            if is_prime { count += 1; }
+            if is_prime {
+                count += 1;
+            }
         }
         count
     }
@@ -77,27 +84,22 @@ impl CpuHeavyContract {
         sum
     }
 
-    pub fn combined_benchmark(
-        env: Env, 
-        fib_n: u32, 
-        sort_size: u32, 
-        prime_limit: u32
-    ) -> Vec<u64> {
+    pub fn combined_benchmark(env: Env, fib_n: u32, sort_size: u32, prime_limit: u32) -> Vec<u64> {
         if fib_n > 10_000 || sort_size > 100 || prime_limit > 5_000 {
             panic!("combined inputs too large");
         }
 
         let mut results = Vec::new(&env);
         results.push_back(Self::fibonacci_iterative(env.clone(), fib_n));
-        
+
         let mut to_sort = Vec::new(&env);
         for i in (0..sort_size).rev() {
             to_sort.push_back(i);
         }
         Self::bubble_sort(env.clone(), to_sort);
-        
+
         results.push_back(Self::count_primes(env.clone(), prime_limit) as u64);
-        
+
         results
     }
 }

@@ -140,7 +140,11 @@ impl LiquidityPool {
                 .checked_mul(total_shares)
                 .ok_or(Error::InsufficientLiquidity)?
                 / reserve_b;
-            if share_a < share_b { share_a } else { share_b }
+            if share_a < share_b {
+                share_a
+            } else {
+                share_b
+            }
         };
 
         // Mint shares (store balance in PERSISTENT storage)

@@ -35,7 +35,7 @@ fn test_combined_benchmark() {
 
     let results = client.combined_benchmark(&100, &20, &50);
     // Combined returns results for Fibonacci and Prime counting
-    assert_eq!(results.len(), 2); 
+    assert_eq!(results.len(), 2);
 }
 
 #[test]
