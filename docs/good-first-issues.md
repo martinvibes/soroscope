@@ -16,6 +16,7 @@ Click on any of the links below to get started.
 | [**#48 [Contract] feat: Add Pausable Functionality**](https://github.com/SoroLabs/soroscope/issues/48) | 🟡 Medium | `enhancement`, `security` |
 | [**#49 [Contract] feat: Admin Fee Control**](https://github.com/SoroLabs/soroscope/issues/49) | 🔴 Hard | `enhancement`, `advanced` |
 | [**#50 [Contract] test: Fuzz Testing for Swap Formula**](https://github.com/SoroLabs/soroscope/issues/50) | 🔴 Hard | `testing`, `advanced` |
+| [**#51 [Contract] feat: Implement Liquidity Pool Factory**](https://github.com/SoroLabs/soroscope/issues/51) | 🔴 Hard | `enhancement`, `advanced` |
 
 ## 🚀 How to Start Contributing
 
