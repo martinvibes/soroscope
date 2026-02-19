@@ -1,13 +1,7 @@
-# 🌟 Structured Issues for Soroscope
+#!/bin/bash
 
-We have refined our issue list to ensure every contribution is meaningful and impactful. Below are the open issues for you to tackle, structured with clear context, expectations, and timeframes.
-
----
-
-## 🟢 Trivial Issues (100 Points)
-
-### #41 [Contract] docs: Add Rustdoc to Liquidity Pool
-
+# Issue #41
+cat <<EOF > /tmp/issue_41.md
 **Description**
 The Liquidity Pool contract is the core of our DEX, but currently lacks inline documentation.
 
@@ -15,7 +9,7 @@ The Liquidity Pool contract is the core of our DEX, but currently lacks inline d
 Add Rustdoc comments to public functions and structs to improve developer onboarding and code maintainability.
 
 **Context**
-The \`LiquidityPool\` contract uses the Soroban SDK. We need standard Rustdoc comments (\`///\`) for all public functions and structs so that `cargo doc` produces useful output.
+The \`LiquidityPool\` contract uses the Soroban SDK. We need standard Rustdoc comments (\`///\`) for all public functions and structs so that \`cargo doc\` produces useful output.
 
 **Requirements**
 - Check \`contracts/liquidity_pool/src/lib.rs\`.
@@ -23,23 +17,23 @@ The \`LiquidityPool\` contract uses the Soroban SDK. We need standard Rustdoc co
 
 **Implementation Guidelines**
 - Use standard Rust documentation style.
-- Verification: Run `cargo doc` to ensure it compiles without warnings.
+- Verification: Run \`cargo doc\` to ensure it compiles without warnings.
 
 **Complexity**
 Trivial (100 points): Documentation only.
 
 **Commitment**
 Please provide an ETA (Estimated Time of Arrival) when requesting to be assigned to this issue. Failure to provide an ETA may result in the assignment being delayed or rejected.
+EOF
+gh issue edit 41 --title "[Contract] docs: Add Rustdoc to Liquidity Pool" --body-file /tmp/issue_41.md
 
----
-
-### #42 [Contract] test: Add Zero-Amount Deposit Test
-
+# Issue #42
+cat <<EOF > /tmp/issue_42.md
 **Description**
 Edge cases in DeFi contracts can lead to unexpected behavior. We need to verify robustness against zero-value inputs.
 
 **Goal**
-Verify that the `deposit` function handles zero amounts correctly (either by rejecting them or handling them gracefully).
+Verify that the \`deposit\` function handles zero amounts correctly (either by rejecting them or handling them gracefully).
 
 **Context**
 Current tests cover standard flows. We need a specific test case for \`amount_a = 0\` and \`amount_b = 0\`.
@@ -49,19 +43,19 @@ Current tests cover standard flows. We need a specific test case for \`amount_a 
 - Assert that the transaction either fails with a specific error or results in 0 shares minted without panic.
 
 **Implementation Guidelines**
-- Look at existing tests in `test.rs` for pattern.
-- Create a new test function `test_deposit_zero_amount`.
+- Look at existing tests in \`test.rs\` for pattern.
+- Create a new test function \`test_deposit_zero_amount\`.
 
 **Complexity**
 Trivial (100 points): Single test case.
 
 **Commitment**
 Please provide an ETA (Estimated Time of Arrival) when requesting to be assigned to this issue. Failure to provide an ETA may result in the assignment being delayed or rejected.
+EOF
+gh issue edit 42 --title "[Contract] test: Add Zero-Amount Deposit Test" --body-file /tmp/issue_42.md
 
----
-
-### #43 [Contract] refactor: Use 'const' for Error Codes
-
+# Issue #43
+cat <<EOF > /tmp/issue_43.md
 **Description**
 Magic numbers in error reporting make debugging and maintaining validity checks difficult.
 
@@ -72,23 +66,23 @@ Refactor error codes to use explicit constants or enum variants coverage across 
 The \`Error\` enum in \`contracts/liquidity_pool/src/lib.rs\` is already an enum, but some logic might still be using raw numbers or implicit casts.
 
 **Requirements**
-- Scan `lib.rs` for any hardcoded integer returns in `Err(...)`.
-- Replace them with `Error::Variant`.
+- Scan \`lib.rs\` for any hardcoded integer returns in \`Err(...)\`.
+- Replace them with \`Error::Variant\`.
 
 **Implementation Guidelines**
 - Ensure no logic change, only refactoring.
-- Run `cargo test` to ensure no regressions.
+- Run \`cargo test\` to ensure no regressions.
 
 **Complexity**
 Trivial (100 points): Code cleanup.
 
 **Commitment**
 Please provide an ETA (Estimated Time of Arrival) when requesting to be assigned to this issue. Failure to provide an ETA may result in the assignment being delayed or rejected.
+EOF
+gh issue edit 43 --title "[Contract] refactor: Use 'const' for Error Codes" --body-file /tmp/issue_43.md
 
----
-
-### #44 [Contract] test: Verify Event Emission in Token Contract
-
+# Issue #44
+cat <<EOF > /tmp/issue_44.md
 **Description**
 Events are crucial for indexers and UIs to track contract activity.
 
@@ -103,7 +97,7 @@ The \`LiquidityPool\` emits \`Deposit\`, \`Swap\`, and \`Withdraw\` events. We n
 - Assert the *content* of the events match the transaction details.
 
 **Implementation Guidelines**
-- Use `e.events().all()` to inspect the event log.
+- Use \`e.events().all()\` to inspect the event log.
 - Match against expected topics and data.
 
 **Complexity**
@@ -111,18 +105,16 @@ Trivial (100 points): Test assertion updates.
 
 **Commitment**
 Please provide an ETA (Estimated Time of Arrival) when requesting to be assigned to this issue. Failure to provide an ETA may result in the assignment being delayed or rejected.
+EOF
+gh issue edit 44 --title "[Contract] test: Verify Event Emission in Token Contract" --body-file /tmp/issue_44.md
 
----
-
-## 🟡 Medium Issues (150 Points)
-
-### #45 [Contract] feat: Implement 'approve' in Liquidity Pool
-
+# Issue #45
+cat <<EOF > /tmp/issue_45.md
 **Description**
-Our LP Share token needs to support the standard `approve` pattern (allowance) for third-party compatibility.
+Our LP Share token needs to support the standard \`approve\` pattern (allowance) for third-party compatibility.
 
 **Goal**
-Implement the `approve` function to allow third-party contracts to spend user shares.
+Implement the \`approve\` function to allow third-party contracts to spend user shares.
 
 **Context**
 To be fully compatible with the Soroban Token Interface (SEP-41), we must support allowances.
@@ -133,21 +125,21 @@ To be fully compatible with the Soroban Token Interface (SEP-41), we must suppor
 - Add \`allowance\` read function.
 
 **Implementation Guidelines**
-- Use `DataKey::Allowance(AllowanceDataKey)` pattern for storage.
-- Ensure proper authorization checks (`from.require_auth()`).
+- Use \`DataKey::Allowance(AllowanceDataKey)\` pattern for storage.
+- Ensure proper authorization checks (\`from.require_auth()\`).
 
 **Complexity**
 Medium (150 points): State change and authorization logic.
 
 **Commitment**
 Please provide an ETA (Estimated Time of Arrival) when requesting to be assigned to this issue. Failure to provide an ETA may result in the assignment being delayed or rejected.
+EOF
+gh issue edit 45 --title "[Contract] feat: Implement 'approve' in Liquidity Pool" --body-file /tmp/issue_45.md
 
----
-
-### #46 [Contract] feat: Implement 'transfer_from' in Liquidity Pool
-
+# Issue #46
+cat <<EOF > /tmp/issue_46.md
 **Description**
-Completes the standard token interface by adding `transfer_from`.
+Completes the standard token interface by adding \`transfer_from\`.
 
 **Goal**
 Allow a spender to transfer tokens on behalf of an owner, up to the approved allowance.
@@ -157,11 +149,11 @@ Depends on #45 (Approve). This is the second half of the allowance mechanism.
 
 **Requirements**
 - Implement \`transfer_from(e: Env, spender: Address, from: Address, to: Address, amount: i128)\`.
-- Check that `allowance >= amount`.
+- Check that \`allowance >= amount\`.
 - Decrement allowance and perform transfer.
 
 **Implementation Guidelines**
-- Reuse `transfer` logic if possible or extract shared logic.
+- Reuse \`transfer\` logic if possible or extract shared logic.
 - Ensure atomicity.
 
 **Complexity**
@@ -169,19 +161,19 @@ Medium (150 points): Interdependent state logic.
 
 **Commitment**
 Please provide an ETA (Estimated Time of Arrival) when requesting to be assigned to this issue. Failure to provide an ETA may result in the assignment being delayed or rejected.
+EOF
+gh issue edit 46 --title "[Contract] feat: Implement 'transfer_from' in Liquidity Pool" --body-file /tmp/issue_46.md
 
----
-
-### #47 [Contract] feat: Add 'burn' to Liquidity Pool
-
+# Issue #47
+cat <<EOF > /tmp/issue_47.md
 **Description**
-A raw `burn` function allows users to voluntarily destroy shares without withdrawing assets.
+A raw \`burn\` function allows users to voluntarily destroy shares without withdrawing assets.
 
 **Goal**
-Implement a `burn` function for deflationary mechanisms or proof-of-burn.
+Implement a \`burn\` function for deflationary mechanisms or proof-of-burn.
 
 **Context**
-Currently, shares are only burned during `withdraw` (which returns assets). This new function should burn shares *without* returning assets (increasing the value of remaining shares).
+Currently, shares are only burned during \`withdraw\` (which returns assets). This new function should burn shares *without* returning assets (increasing the value of remaining shares).
 
 **Requirements**
 - Implement \`burn(e: Env, from: Address, amount: i128)\`.
@@ -190,19 +182,19 @@ Currently, shares are only burned during `withdraw` (which returns assets). This
 - Emit \`Burn\` event.
 
 **Implementation Guidelines**
-- Ensure `from` has enough balance.
-- Update `TotalShares` storage.
+- Ensure \`from\` has enough balance.
+- Update \`TotalShares\` storage.
 
 **Complexity**
 Medium (150 points): State manipulation and event emission.
 
 **Commitment**
 Please provide an ETA (Estimated Time of Arrival) when requesting to be assigned to this issue. Failure to provide an ETA may result in the assignment being delayed or rejected.
+EOF
+gh issue edit 47 --title "[Contract] feat: Add 'burn' to Liquidity Pool" --body-file /tmp/issue_47.md
 
----
-
-### #48 [Contract] feat: Add Pausable Functionality
-
+# Issue #48
+cat <<EOF > /tmp/issue_48.md
 **Description**
 Security mechanism to stop contract operations in emergencies.
 
@@ -210,7 +202,7 @@ Security mechanism to stop contract operations in emergencies.
 Allow an admin to pause deposits and swaps to prevent loss of funds during an incident.
 
 **Context**
-We need a `paused` state that acts as a circuit breaker for all state-changing functions.
+We need a \`paused\` state that acts as a circuit breaker for all state-changing functions.
 
 **Requirements**
 - Add \`Admin\` state to the contract (initialized in \`initialize\`).
@@ -218,21 +210,19 @@ We need a `paused` state that acts as a circuit breaker for all state-changing f
 - Add checks in \`deposit\`, \`swap\`, \`withdraw\` to revert if \`paused\` is true.
 
 **Implementation Guidelines**
-- Define `DataKey::Admin` and `DataKey::Paused`.
-- Create a helper `check_paused(&e)` to reduce code duplication.
+- Define \`DataKey::Admin\` and \`DataKey::Paused\`.
+- Create a helper \`check_paused(&e)\` to reduce code duplication.
 
 **Complexity**
 Medium (150 points): Access control and state management.
 
 **Commitment**
 Please provide an ETA (Estimated Time of Arrival) when requesting to be assigned to this issue. Failure to provide an ETA may result in the assignment being delayed or rejected.
+EOF
+gh issue edit 48 --title "[Contract] feat: Add Pausable Functionality" --body-file /tmp/issue_48.md
 
----
-
-## 🔴 High Issues (200 Points)
-
-### #49 [Contract] feat: Admin Fee Control
-
+# Issue #49
+cat <<EOF > /tmp/issue_49.md
 **Description**
 The protocol fee is currently hardcoded and immutable.
 
@@ -249,7 +239,7 @@ We need flexibility to adjust fees (e.g., 0.1% to 1%) without upgrading the enti
 - Add admin function \`set_fee\`.
 
 **Implementation Guidelines**
-- Reuse `Admin` key from #48 if available, or create new.
+- Reuse \`Admin\` key from #48 if available, or create new.
 - Ensure math handles the dynamic variable correctly (overflow checks).
 
 **Complexity**
@@ -257,23 +247,23 @@ High (200 points): Mathematical implications and access control.
 
 **Commitment**
 Please provide an ETA (Estimated Time of Arrival) when requesting to be assigned to this issue. Failure to provide an ETA may result in the assignment being delayed or rejected.
+EOF
+gh issue edit 49 --title "[Contract] feat: Admin Fee Control" --body-file /tmp/issue_49.md
 
----
-
-### #50 [Contract] test: Fuzz Testing for Swap Formula
-
+# Issue #50
+cat <<EOF > /tmp/issue_50.md
 **Description**
 Constant product formula verification across the entire input space.
 
 **Goal**
-Ensure the swap formula `x * y = k` never violates invariants (never decreases k) through fuzz testing.
+Ensure the swap formula \`x * y = k\` never violates invariants (never decreases k) through fuzz testing.
 
 **Context**
 Edge cases with large numbers or small numbers can cause rounding issues. Fuzzing explores these edge cases automatically.
 
 **Requirements**
 - Use \`soroban-sdk\` test fuzzing capabilities or \`proptest\`.
-- Define invariants: `k_after >= k_before`.
+- Define invariants: \`k_after >= k_before\`.
 - Test with max \`i128\` values.
 
 **Implementation Guidelines**
@@ -285,5 +275,7 @@ High (200 points): Advanced testing techniques.
 
 **Commitment**
 Please provide an ETA (Estimated Time of Arrival) when requesting to be assigned to this issue. Failure to provide an ETA may result in the assignment being delayed or rejected.
+EOF
+gh issue edit 50 --title "[Contract] test: Fuzz Testing for Swap Formula" --body-file /tmp/issue_50.md
 
----
+rm /tmp/issue_*.md
