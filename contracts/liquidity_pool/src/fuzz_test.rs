@@ -1,4 +1,3 @@
-#![cfg(test)]
 
 use crate::LiquidityPoolClient;
 use proptest::prelude::*;
@@ -39,7 +38,7 @@ proptest! {
         token_b_admin.mint(&user, &reserve_b);
         client.deposit(&user, &reserve_a, &reserve_b);
 
-        let k_before = reserve_a as i128 * reserve_b as i128; // Fits in i128 if inputs are < 10^18
+        let k_before = reserve_a * reserve_b; // Fits in i128 if inputs are < 10^18
 
         // We need another user for swapping
         let swapper = Address::generate(&e);
@@ -61,7 +60,7 @@ proptest! {
             let pool_balance_a = token_a_client.balance(&contract_id);
             let pool_balance_b = token_b_client.balance(&contract_id);
 
-            let k_after = pool_balance_a as i128 * pool_balance_b as i128;
+            let k_after = pool_balance_a * pool_balance_b;
 
             assert!(k_after >= k_before, "Invariant violated! K before: {}, K after: {}", k_before, k_after);
         }
