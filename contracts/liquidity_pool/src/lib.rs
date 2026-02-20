@@ -5,6 +5,7 @@ use soroban_sdk::{contract, contracterror, contractimpl, contracttype, Address, 
 mod test;
 
 // Custom Error enum for better error handling
+/// Errors returned by the `LiquidityPool` contract.
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
@@ -20,31 +21,47 @@ pub enum Error {
 }
 
 // Event structures for state-changing operations
+/// Event payload emitted after a successful deposit.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DepositEvent {
+    /// Address that supplied liquidity.
     pub user: Address,
+    /// Amount of token A deposited.
     pub amount_a: i128,
+    /// Amount of token B deposited.
     pub amount_b: i128,
+    /// LP shares minted for the depositor.
     pub shares_minted: i128,
 }
 
+/// Event payload emitted after a successful swap.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SwapEvent {
+    /// Address that executed the swap.
     pub user: Address,
+    /// Token address provided by the user.
     pub token_in: Address,
+    /// Token address received by the user.
     pub token_out: Address,
+    /// Amount of `token_in` transferred into the pool.
     pub amount_in: i128,
+    /// Amount of `token_out` transferred out of the pool.
     pub amount_out: i128,
 }
 
+/// Event payload emitted after a successful withdrawal.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WithdrawEvent {
+    /// Address that withdrew liquidity.
     pub user: Address,
+    /// LP shares burned for this withdrawal.
     pub shares_burned: i128,
+    /// Amount of token A withdrawn.
     pub amount_a: i128,
+    /// Amount of token B withdrawn.
     pub amount_b: i128,
 }
 
@@ -73,6 +90,7 @@ fn sqrt(x: i128) -> i128 {
     y
 }
 
+/// Storage keys used by the liquidity pool contract.
 #[contracttype]
 #[derive(Clone)]
 pub enum DataKey {
@@ -88,10 +106,21 @@ pub enum DataKey {
 }
 
 #[contract]
+/// Constant-product AMM liquidity pool with LP share accounting.
 pub struct LiquidityPool;
 
 #[contractimpl]
 impl LiquidityPool {
+    /// Initializes the liquidity pool once with token pair addresses.
+    ///
+    /// # Parameters
+    /// - `e`: Soroban environment.
+    /// - `token_a`: Contract address of token A.
+    /// - `token_b`: Contract address of token B.
+    ///
+    /// # Returns
+    /// - `Ok(())` when initialization succeeds.
+    /// - `Err(Error::AlreadyInitialized)` if the pool was already initialized.
     pub fn initialize(
         e: Env,
         admin: Address,
@@ -152,6 +181,22 @@ impl LiquidityPool {
         Ok(())
     }
 
+    /// Deposits token A and token B into the pool and mints LP shares.
+    ///
+    /// The caller (`to`) must authorize the transfer. For first liquidity,
+    /// shares are minted as `sqrt(amount_a * amount_b)`. For subsequent
+    /// deposits, shares are minted proportionally to existing reserves.
+    ///
+    /// # Parameters
+    /// - `e`: Soroban environment.
+    /// - `to`: Liquidity provider address receiving LP shares.
+    /// - `amount_a`: Amount of token A to deposit.
+    /// - `amount_b`: Amount of token B to deposit.
+    ///
+    /// # Returns
+    /// - `Ok(i128)`: Number of LP shares minted.
+    /// - `Err(Error::NotInitialized)`: Pool tokens were not configured.
+    /// - `Err(Error::InsufficientLiquidity)`: Arithmetic failed (for example overflow).
     pub fn deposit(e: Env, to: Address, amount_a: i128, amount_b: i128) -> Result<i128, Error> {
         to.require_auth();
 
@@ -243,6 +288,23 @@ impl LiquidityPool {
         Ok(shares)
     }
 
+    /// Swaps into one side of the pool using constant-product pricing with a 0.3% fee.
+    ///
+    /// If `buy_a` is `true`, the user buys token A by paying token B.
+    /// Otherwise, the user buys token B by paying token A.
+    ///
+    /// # Parameters
+    /// - `e`: Soroban environment.
+    /// - `to`: Trader address performing the swap.
+    /// - `buy_a`: Direction flag; `true` buys token A, `false` buys token B.
+    /// - `out`: Exact amount of output token requested.
+    /// - `in_max`: Maximum input amount the trader allows (slippage guard).
+    ///
+    /// # Returns
+    /// - `Ok(i128)`: Actual input amount charged.
+    /// - `Err(Error::NotInitialized)`: Pool tokens were not configured.
+    /// - `Err(Error::InsufficientLiquidity)`: Requested `out` exceeds available reserve.
+    /// - `Err(Error::SlippageExceeded)`: Required input is greater than `in_max`.
     pub fn swap(e: Env, to: Address, buy_a: bool, out: i128, in_max: i128) -> Result<i128, Error> {
         to.require_auth();
 
@@ -337,6 +399,17 @@ impl LiquidityPool {
         Ok(amount_in)
     }
 
+    /// Burns LP shares and withdraws proportional token A and token B reserves.
+    ///
+    /// # Parameters
+    /// - `e`: Soroban environment.
+    /// - `to`: Liquidity provider address receiving withdrawn tokens.
+    /// - `share_amount`: Number of LP shares to burn.
+    ///
+    /// # Returns
+    /// - `Ok((i128, i128))`: Tuple `(amount_a, amount_b)` withdrawn.
+    /// - `Err(Error::InsufficientShares)`: User does not own enough LP shares.
+    /// - `Err(Error::NotInitialized)`: Pool state is incomplete or not initialized.
     pub fn withdraw(e: Env, to: Address, share_amount: i128) -> Result<(i128, i128), Error> {
         to.require_auth();
 
@@ -412,23 +485,28 @@ impl LiquidityPool {
     // ========== Token Interface Methods ==========
     // Make LP shares compatible with Soroban Token standard
 
+    /// Returns the LP token display name.
     pub fn name(e: Env) -> String {
         String::from_str(&e, "Liquidity Pool Share")
     }
 
+    /// Returns the LP token symbol.
     pub fn symbol(e: Env) -> String {
         String::from_str(&e, "LPS")
     }
 
+    /// Returns the LP token decimals.
     pub fn decimals(_e: Env) -> u32 {
         7
     }
 
+    /// Returns the LP token balance of `id`.
     pub fn balance(e: Env, id: Address) -> i128 {
         let key = DataKey::Balance(id);
         e.storage().persistent().get(&key).unwrap_or(0)
     }
 
+    /// Returns total outstanding LP token supply.
     pub fn total_supply(e: Env) -> i128 {
         e.storage()
             .instance()
@@ -436,6 +514,9 @@ impl LiquidityPool {
             .unwrap_or(0)
     }
 
+    /// Transfers LP shares from `from` to `to`.
+    ///
+    /// Returns `Err(Error::InsufficientBalance)` when `from` lacks enough shares.
     pub fn transfer(e: Env, from: Address, to: Address, amount: i128) -> Result<(), Error> {
         from.require_auth();
 
