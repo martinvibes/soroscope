@@ -8,6 +8,7 @@ import { FunctionSidebar } from '../components/FunctionSidebar';
 import { ContractInteraction } from '../components/ContractInteraction';
 import { MOCK_CONTRACT_FUNCTIONS, generateMockResult, generateMockResourceCost } from '../lib/sorobantypes';
 import type { ContractFunction, InvocationResult } from '../lib/sorobantypes';
+import { UploadZone } from '../components/upload-zone';
 
 export default function Home() {
   const [contractId, setContractId] = useState('CAEZJVJ4N7P7GRUVD5NG5LYYH23AQHJUKQEUHW54LR5PGQX3V7FXD7Q');
@@ -95,6 +96,33 @@ export default function Home() {
 
       {/* Main Content */}
       <main style={{ maxWidth: '1200px', margin: '0 auto', padding: '24px' }}>
+
+        {/* WASM Upload Zone */}
+        <div
+          style={{
+            backgroundColor: '#161b22',
+            borderRadius: '12px',
+            padding: '28px',
+            marginBottom: '24px',
+            border: '1px solid #30363d',
+          }}
+        >
+          <div style={{ marginBottom: '16px' }}>
+            <h2 style={{ margin: '0 0 4px 0', fontSize: '16px', fontWeight: '600', color: '#c9d1d9' }}>
+              Upload Contract
+            </h2>
+            <p style={{ margin: '0', fontSize: '13px', color: '#8b949e' }}>
+              Drop a compiled Soroban contract (.wasm) to analyse its resource usage
+            </p>
+          </div>
+          <UploadZone
+            onFileReady={(file) => {
+              console.log('[UploadZone] Contract ready for analysis:', file.name, file.size, 'bytes');
+              // TODO: wire into your analysis flow, e.g. POST file bytes to /analyze
+            }}
+          />
+        </div>
+
         {/* Contract ID Input */}
         <div
           style={{
