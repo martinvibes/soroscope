@@ -17,6 +17,7 @@ pub enum Error {
     NotInitialized = 5,
     InsufficientBalance = 6,
     Unauthorized = 7,
+    InvalidFee = 8,
 }
 
 // Event structures for state-changing operations
@@ -64,6 +65,14 @@ pub struct WithdrawEvent {
     pub amount_b: i128,
 }
 
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FeeChangedEvent {
+    pub admin: Address,
+    pub old_fee_bps: i128,
+    pub new_fee_bps: i128,
+}
+
 // Helper function: integer square root using Newton's method
 fn sqrt(x: i128) -> i128 {
     if x == 0 {
@@ -92,6 +101,8 @@ pub enum DataKey {
     ShareToken,
     TotalShares,
     Balance(Address),
+    Admin,
+    FeeBasisPoints,
 }
 
 #[contract]
@@ -110,15 +121,63 @@ impl LiquidityPool {
     /// # Returns
     /// - `Ok(())` when initialization succeeds.
     /// - `Err(Error::AlreadyInitialized)` if the pool was already initialized.
-    pub fn initialize(e: Env, token_a: Address, token_b: Address) -> Result<(), Error> {
+    pub fn initialize(
+        e: Env,
+        admin: Address,
+        token_a: Address,
+        token_b: Address,
+    ) -> Result<(), Error> {
         if e.storage().instance().has(&DataKey::TokenA) {
             return Err(Error::AlreadyInitialized);
         }
+        e.storage().instance().set(&DataKey::Admin, &admin);
         e.storage().instance().set(&DataKey::TokenA, &token_a);
         e.storage().instance().set(&DataKey::TokenB, &token_b);
         e.storage().instance().set(&DataKey::ReserveA, &0i128);
         e.storage().instance().set(&DataKey::ReserveB, &0i128);
         e.storage().instance().set(&DataKey::TotalShares, &0i128);
+        // Default fee: 30 bps (≈ 0.3%)
+        e.storage()
+            .instance()
+            .set(&DataKey::FeeBasisPoints, &30i128);
+        Ok(())
+    }
+
+    /// Returns the current fee in basis points.
+    pub fn get_fee(e: Env) -> i128 {
+        e.storage()
+            .instance()
+            .get(&DataKey::FeeBasisPoints)
+            .unwrap_or(30)
+    }
+
+    /// Admin-only: update the swap fee. Valid range: 0–100 bps (0%–1%).
+    pub fn set_fee(e: Env, fee_bps: i128) -> Result<(), Error> {
+        if !(0..=100).contains(&fee_bps) {
+            return Err(Error::InvalidFee);
+        }
+        let admin: Address = e
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(Error::NotInitialized)?;
+        admin.require_auth();
+        let old_fee: i128 = e
+            .storage()
+            .instance()
+            .get(&DataKey::FeeBasisPoints)
+            .unwrap_or(30);
+        e.storage()
+            .instance()
+            .set(&DataKey::FeeBasisPoints, &fee_bps);
+        e.events().publish(
+            (String::from_str(&e, "fee_changed"), admin.clone()),
+            FeeChangedEvent {
+                admin,
+                old_fee_bps: old_fee,
+                new_fee_bps: fee_bps,
+            },
+        );
         Ok(())
     }
 
@@ -270,17 +329,30 @@ impl LiquidityPool {
 
         // K = Rin * Rout
         // (Rin + AmountIn) * (Rout - AmountOut) = K
-        // Rin * Rout + AmountIn * Rout - Rin * AmountOut - AmountIn * AmountOut = Rin * Rout
-        // AmountIn * (Rout - AmountOut) = Rin * AmountOut
         // AmountIn = (Rin * AmountOut) / (Rout - AmountOut)
-        // Add 0.3% fee: AmountInWithFee = AmountIn * 1000 / 997
+        // With fee: AmountInWithFee = AmountIn * 10_000 / (10_000 - fee_bps)
+        //
+        // fee_bps = 30 → fee_scale = 9970, which is identical to the old 997/1000 ratio.
 
         if out >= reserve_out {
             return Err(Error::InsufficientLiquidity);
         }
 
-        let numerator = reserve_in * out * 1000;
-        let denominator = (reserve_out - out) * 997;
+        let fee_bps: i128 = e
+            .storage()
+            .instance()
+            .get(&DataKey::FeeBasisPoints)
+            .unwrap_or(30);
+        let fee_scale = 10_000i128 - fee_bps;
+
+        let numerator = reserve_in
+            .checked_mul(out)
+            .ok_or(Error::InsufficientLiquidity)?
+            .checked_mul(10_000)
+            .ok_or(Error::InsufficientLiquidity)?;
+        let denominator = (reserve_out - out)
+            .checked_mul(fee_scale)
+            .ok_or(Error::InsufficientLiquidity)?;
         let amount_in = (numerator / denominator) + 1;
 
         if amount_in > in_max {
