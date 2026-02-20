@@ -557,32 +557,43 @@ impl LiquidityPool {
         Ok(())
     }
 
-    pub fn approve(e: Env, from: Address, spender: Address, amount: i128, expiration_ledger: u32) -> Result<(), Error> {
+    pub fn approve(
+        e: Env,
+        from: Address,
+        spender: Address,
+        amount: i128,
+        expiration_ledger: u32,
+    ) -> Result<(), Error> {
         from.require_auth();
-        
+
         let allowance_key = DataKey::Allowance(AllowanceDataKey {
             from: from.clone(),
             spender: spender.clone(),
         });
-        
+
         let allowance_value = AllowanceValue {
             amount,
             expiration_ledger,
         };
-        
-        e.storage().persistent().set(&allowance_key, &allowance_value);
-        e.storage().persistent().extend_ttl(&allowance_key, 100, 100);
-        
+
+        e.storage()
+            .persistent()
+            .set(&allowance_key, &allowance_value);
+        e.storage()
+            .persistent()
+            .extend_ttl(&allowance_key, 100, 100);
+
         Ok(())
     }
-    
+
     pub fn allowance(e: Env, from: Address, spender: Address) -> i128 {
-        let allowance_key = DataKey::Allowance(AllowanceDataKey {
-            from,
-            spender,
-        });
-        
-        match e.storage().persistent().get::<_, AllowanceValue>(&allowance_key) {
+        let allowance_key = DataKey::Allowance(AllowanceDataKey { from, spender });
+
+        match e
+            .storage()
+            .persistent()
+            .get::<_, AllowanceValue>(&allowance_key)
+        {
             Some(allowance) => {
                 // Check if allowance has expired
                 if e.ledger().sequence() > allowance.expiration_ledger {
@@ -594,36 +605,51 @@ impl LiquidityPool {
             None => 0,
         }
     }
-    
-    pub fn transfer_from(e: Env, spender: Address, from: Address, to: Address, amount: i128) -> Result<(), Error> {
+
+    pub fn transfer_from(
+        e: Env,
+        spender: Address,
+        from: Address,
+        to: Address,
+        amount: i128,
+    ) -> Result<(), Error> {
         spender.require_auth();
-        
+
         // Check allowance
         let current_allowance = Self::allowance(e.clone(), from.clone(), spender.clone());
         if current_allowance < amount {
             return Err(Error::InsufficientBalance); // Using existing error type
         }
-        
+
         // Update allowance (decrement by amount)
         let new_allowance = current_allowance - amount;
         let allowance_key = DataKey::Allowance(AllowanceDataKey {
             from: from.clone(),
             spender: spender.clone(),
         });
-        
+
         if new_allowance > 0 {
             // Update existing allowance
             let allowance_value = AllowanceValue {
                 amount: new_allowance,
-                expiration_ledger: e.storage().persistent().get::<_, AllowanceValue>(&allowance_key).unwrap().expiration_ledger,
+                expiration_ledger: e
+                    .storage()
+                    .persistent()
+                    .get::<_, AllowanceValue>(&allowance_key)
+                    .unwrap()
+                    .expiration_ledger,
             };
-            e.storage().persistent().set(&allowance_key, &allowance_value);
-            e.storage().persistent().extend_ttl(&allowance_key, 100, 100);
+            e.storage()
+                .persistent()
+                .set(&allowance_key, &allowance_value);
+            e.storage()
+                .persistent()
+                .extend_ttl(&allowance_key, 100, 100);
         } else {
             // Remove allowance if it's depleted
             e.storage().persistent().remove(&allowance_key);
         }
-        
+
         // Perform the transfer using existing transfer logic
         Self::transfer(e, from, to, amount)
     }
