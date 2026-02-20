@@ -66,6 +66,16 @@ pub struct WithdrawEvent {
     pub amount_b: i128,
 }
 
+/// Event payload emitted after a successful burn.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BurnEvent {
+    /// Address that burned liquidity.
+    pub user: Address,
+    /// LP shares burned.
+    pub shares_burned: i128,
+}
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FeeChangedEvent {
@@ -525,6 +535,57 @@ impl LiquidityPool {
         );
 
         Ok((amount_a, amount_b))
+    }
+
+    /// Burns LP shares without withdrawing token reserves.
+    ///
+    /// # Parameters
+    /// - `e`: Soroban environment.
+    /// - `from`: Address burning the tokens.
+    /// - `amount`: Number of LP shares to burn.
+    ///
+    /// # Returns
+    /// - `Ok(())`: Success.
+    /// - `Err(Error::InsufficientShares)`: User does not own enough LP shares.
+    /// - `Err(Error::NotInitialized)`: Pool state is incomplete or not initialized.
+    pub fn burn(e: Env, from: Address, amount: i128) -> Result<(), Error> {
+        check_paused(&e)?;
+        from.require_auth();
+
+        let user_share_key = DataKey::Balance(from.clone());
+        let current_user_share: i128 = e.storage().persistent().get(&user_share_key).unwrap_or(0);
+        if amount > current_user_share {
+            return Err(Error::InsufficientShares);
+        }
+
+        let total_shares: i128 = e
+            .storage()
+            .instance()
+            .get(&DataKey::TotalShares)
+            .ok_or(Error::NotInitialized)?;
+
+        // Burn shares (persistent storage)
+        e.storage()
+            .persistent()
+            .set(&user_share_key, &(current_user_share - amount));
+        e.storage()
+            .persistent()
+            .extend_ttl(&user_share_key, 100, 100);
+
+        e.storage()
+            .instance()
+            .set(&DataKey::TotalShares, &(total_shares - amount));
+
+        // Emit burn event
+        e.events().publish(
+            (String::from_str(&e, "burn"), from.clone()),
+            BurnEvent {
+                user: from,
+                shares_burned: amount,
+            },
+        );
+
+        Ok(())
     }
 
     // ========== Token Interface Methods ==========

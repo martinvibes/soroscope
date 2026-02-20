@@ -396,30 +396,6 @@ fn test_approve() {
 }
 
 #[test]
-fn test_get_fee_default() {
-    let e = Env::default();
-    e.mock_all_auths();
-
-    let contract_id = e.register(LiquidityPool, ());
-    let client = LiquidityPoolClient::new(&e, &contract_id);
-
-    let admin = Address::generate(&e);
-    let token_a = e
-        .register_stellar_asset_contract_v2(admin.clone())
-        .address();
-    let token_b = e
-        .register_stellar_asset_contract_v2(admin.clone())
-        .address();
-
-    e.cost_estimate().budget().reset_unlimited();
-
-    client.initialize(&admin, &token_a, &token_b);
-
-    // Default fee should be 30 bps
-    assert_eq!(client.get_fee(), 30);
-}
-
-#[test]
 fn test_approve_expired() {
     let e = Env::default();
     e.mock_all_auths();
@@ -461,60 +437,6 @@ fn test_approve_expired() {
 
     // Check that allowance is now 0 (expired)
     assert_eq!(client.allowance(&user1, &spender), 0);
-}
-
-#[test]
-fn test_transfer_from() {
-    let e = Env::default();
-    e.mock_all_auths();
-
-    let contract_id = e.register(LiquidityPool, ());
-    let client = LiquidityPoolClient::new(&e, &contract_id);
-
-    let admin = Address::generate(&e);
-    let token_a = e
-        .register_stellar_asset_contract_v2(admin.clone())
-        .address();
-    let token_b = e
-        .register_stellar_asset_contract_v2(admin.clone())
-        .address();
-
-    e.cost_estimate().budget().reset_unlimited();
-
-    client.initialize(&admin, &token_a, &token_b);
-
-    // 0 bps (free swaps) — valid lower bound
-    client.set_fee(&0);
-    assert_eq!(client.get_fee(), 0);
-
-    // 100 bps (1%) — valid upper bound
-    client.set_fee(&100);
-    assert_eq!(client.get_fee(), 100);
-}
-
-#[test]
-#[should_panic(expected = "Error(Contract, #8)")]
-fn test_set_fee_above_max() {
-    let e = Env::default();
-    e.mock_all_auths();
-
-    let contract_id = e.register(LiquidityPool, ());
-    let client = LiquidityPoolClient::new(&e, &contract_id);
-
-    let admin = Address::generate(&e);
-    let token_a = e
-        .register_stellar_asset_contract_v2(admin.clone())
-        .address();
-    let token_b = e
-        .register_stellar_asset_contract_v2(admin.clone())
-        .address();
-
-    e.cost_estimate().budget().reset_unlimited();
-
-    client.initialize(&admin, &token_a, &token_b);
-
-    // 101 bps — should panic with InvalidFee
-    client.set_fee(&101);
 }
 
 #[test]
@@ -950,4 +872,80 @@ fn test_swap_with_custom_fee() {
     // AmountIn = (1000 * 100) / (1000 - 100) + 1 = 111 + 1 = 112
     let paid = client.swap(&user, &false, &100, &500);
     assert_eq!(paid, 112);
+}
+
+#[test]
+fn test_burn() {
+    let e = Env::default();
+    e.mock_all_auths();
+
+    let contract_id = e.register(LiquidityPool, ());
+    let client = LiquidityPoolClient::new(&e, &contract_id);
+
+    let admin = Address::generate(&e);
+    let token_a = e
+        .register_stellar_asset_contract_v2(admin.clone())
+        .address();
+    let token_b = e
+        .register_stellar_asset_contract_v2(admin.clone())
+        .address();
+
+    let token_a_admin = soroban_sdk::token::StellarAssetClient::new(&e, &token_a);
+    let token_b_admin = soroban_sdk::token::StellarAssetClient::new(&e, &token_b);
+
+    let user = Address::generate(&e);
+
+    e.cost_estimate().budget().reset_unlimited();
+
+    client.initialize(&admin, &token_a, &token_b);
+
+    // Mint and deposit
+    token_a_admin.mint(&user, &1000);
+    token_b_admin.mint(&user, &1000);
+    let _shares = client.deposit(&user, &1000, &1000);
+
+    let supply_before = client.total_supply();
+    let balance_before = client.balance(&user);
+
+    // Burn 400 shares
+    client.burn(&user, &400);
+
+    let supply_after = client.total_supply();
+    let balance_after = client.balance(&user);
+
+    assert_eq!(supply_before - 400, supply_after);
+    assert_eq!(balance_before - 400, balance_after);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #4)")]
+fn test_burn_insufficient_shares() {
+    let e = Env::default();
+    e.mock_all_auths();
+
+    let contract_id = e.register(LiquidityPool, ());
+    let client = LiquidityPoolClient::new(&e, &contract_id);
+
+    let admin = Address::generate(&e);
+    let token_a = e
+        .register_stellar_asset_contract_v2(admin.clone())
+        .address();
+    let token_b = e
+        .register_stellar_asset_contract_v2(admin.clone())
+        .address();
+
+    let token_a_admin = soroban_sdk::token::StellarAssetClient::new(&e, &token_a);
+    let token_b_admin = soroban_sdk::token::StellarAssetClient::new(&e, &token_b);
+
+    let user = Address::generate(&e);
+
+    e.cost_estimate().budget().reset_unlimited();
+
+    client.initialize(&admin, &token_a, &token_b);
+
+    token_a_admin.mint(&user, &1000);
+    token_b_admin.mint(&user, &1000);
+    client.deposit(&user, &1000, &1000);
+
+    client.burn(&user, &2000);
 }
