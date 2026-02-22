@@ -4,12 +4,13 @@ use serde::{Deserialize, Serialize};
 use soroban_sdk::xdr::{
     Hash, HostFunction, InvokeContractArgs, InvokeHostFunctionOp, LedgerKey, Limits, Memo,
     MuxedAccount, Operation, OperationBody, Preconditions, ReadXdr, ScAddress, ScSymbol, ScVal,
-    SequenceNumber, SorobanAuthorizationEntry, SorobanTransactionData, StringM, Transaction,
+    SequenceNumber, SorobanAuthorizationEntry, SorobanTransactionData, Transaction,
     TransactionExt, TransactionV1Envelope, Uint256, VecM, WriteXdr,
 };
 use std::path::Path;
 use stellar_strkey::Strkey;
 use thiserror::Error;
+use crate::parser::ArgParser;
 use tokio::fs;
 
 /// Errors that can occur during simulation
@@ -41,6 +42,9 @@ pub enum SimulationError {
 
     #[error("XDR decode error: {0}")]
     XdrError(String),
+
+    #[error("Parse error: {0}")]
+    ParseError(#[from] crate::parser::ParserError),
 }
 
 /// Soroban resource consumption data
@@ -637,65 +641,41 @@ impl SimulationEngine {
     fn parse_sc_val_arg(&self, arg: &str) -> Result<ScVal, SimulationError> {
         let arg = arg.trim();
 
-        // Boolean
+        // 1. Try parsing as JSON first (for complex types like Maps and Vecs)
+        if arg.starts_with('{') || arg.starts_with('[') {
+            return Ok(ArgParser::parse(arg)?);
+        }
+
+        // 2. Check for Boolean/Void shorthands
         if arg == "true" {
             return Ok(ScVal::Bool(true));
         }
         if arg == "false" {
             return Ok(ScVal::Bool(false));
         }
-
-        // Void
         if arg == "void" || arg == "()" {
             return Ok(ScVal::Void);
         }
 
-        // Symbol (prefixed with :)
-        if let Some(sym) = arg.strip_prefix(':') {
-            let symbol: ScSymbol = sym
-                .try_into()
-                .map_err(|_| SimulationError::InvalidContract("Invalid symbol".to_string()))?;
-            return Ok(ScVal::Symbol(symbol));
+        // 3. Delegation to ArgParser for special types (Addresses, Symbols, Hex)
+        // If it starts with G, C, :, or 0x, we try to parse it as a quoted string
+        if arg.starts_with('G') || arg.starts_with('C') || arg.starts_with(':') || arg.starts_with("0x") {
+            if let Ok(val) = ArgParser::parse(&format!("\"{}\"", arg)) {
+                return Ok(val);
+            }
         }
 
-        // Hex bytes (prefixed with 0x)
-        if let Some(hex_str) = arg.strip_prefix("0x") {
-            let bytes = hex::decode(hex_str).map_err(|e| {
-                SimulationError::InvalidContract(format!("Invalid hex bytes: {}", e))
-            })?;
-            return Ok(ScVal::Bytes(bytes.try_into().map_err(|_| {
-                SimulationError::InvalidContract("Bytes too large".to_string())
-            })?));
+        // 4. Numbers and explicit quoted strings
+        if arg.starts_with('"') || arg.parse::<i64>().is_ok() || arg.parse::<u64>().is_ok() {
+            if let Ok(val) = ArgParser::parse(arg) {
+                return Ok(val);
+            }
         }
 
-        // Quoted string
-        if arg.starts_with('"') && arg.ends_with('"') && arg.len() >= 2 {
-            let s = &arg[1..arg.len() - 1];
-            let string_m: StringM =
-                s.as_bytes().to_vec().try_into().map_err(|_| {
-                    SimulationError::InvalidContract("String too large".to_string())
-                })?;
-            return Ok(ScVal::String(string_m.into()));
-        }
-
-        // Address (G... for account, C... for contract)
-        if arg.starts_with('G') || arg.starts_with('C') {
-            let address = self.parse_address(arg)?;
-            return Ok(ScVal::Address(address));
-        }
-
-        // Try parsing as integer
-        if let Ok(n) = arg.parse::<i64>() {
-            return Ok(ScVal::I64(n));
-        }
-        if let Ok(n) = arg.parse::<u64>() {
-            return Ok(ScVal::U64(n));
-        }
-
-        // Default: treat as symbol
+        // 5. Default fallback: Treat as Symbol (standard Soroban behavior for unquoted strings)
         let symbol: ScSymbol = arg
             .try_into()
-            .map_err(|_| SimulationError::InvalidContract("Cannot parse argument".to_string()))?;
+            .map_err(|_| SimulationError::InvalidContract(format!("Cannot parse argument: {}", arg)))?;
         Ok(ScVal::Symbol(symbol))
     }
 
