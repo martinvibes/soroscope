@@ -1,16 +1,19 @@
+mod auth;
 mod benchmarks;
 mod errors;
 
 use crate::errors::AppError;
 use axum::{
     extract::Json,
+    middleware,
     routing::{get, post},
-    Router,
+    Extension, Router,
 };
 use config::{Config, ConfigError};
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::path::PathBuf;
+use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
@@ -23,6 +26,8 @@ struct AppConfig {
     server_port: u16,
     rust_log: String,
     soroban_rpc_url: String,
+    jwt_secret: String,
+    network_passphrase: String,
 }
 
 fn load_config() -> Result<AppConfig, ConfigError> {
@@ -34,6 +39,8 @@ fn load_config() -> Result<AppConfig, ConfigError> {
         .set_default("server_port", 8080)?
         .set_default("rust_log", "info")?
         .set_default("soroban_rpc_url", "https://soroban-testnet.stellar.org")?
+        .set_default("jwt_secret", "dev-secret-change-in-production")?
+        .set_default("network_passphrase", "Test SDF Network ; September 2015")?
         .build()?;
 
     settings.try_deserialize()
@@ -89,10 +96,15 @@ async fn analyze(Json(payload): Json<AnalyzeRequest>) -> Result<Json<ResourceRep
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(analyze),
-    components(schemas(AnalyzeRequest, ResourceReport)),
+    paths(analyze, auth::challenge_handler, auth::verify_handler),
+    components(schemas(
+        AnalyzeRequest, ResourceReport,
+        auth::ChallengeRequest, auth::ChallengeResponse,
+        auth::VerifyRequest, auth::VerifyResponse
+    )),
     tags(
-        (name = "Analysis", description = "Soroban contract resource analysis endpoints")
+        (name = "Analysis", description = "Soroban contract resource analysis endpoints"),
+        (name = "Auth", description = "SEP-10 wallet authentication")
     ),
     info(
         title = "SoroScope API",
@@ -169,7 +181,21 @@ async fn main() {
     // -------------------------------
     tracing::info!("Starting SoroScope API Server...");
 
+    let auth_state = Arc::new(auth::AuthState::new(
+        config.jwt_secret.clone(),
+        None,
+        config.network_passphrase.clone(),
+    ));
+    tracing::info!(
+        "SEP-10 server account: {}",
+        auth_state.server_stellar_address()
+    );
+
     let cors = CorsLayer::new().allow_origin(Any);
+
+    let protected = Router::new()
+        .route("/analyze", post(analyze))
+        .route_layer(middleware::from_fn(auth::auth_middleware));
 
     let app = Router::new()
         .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))
@@ -184,7 +210,10 @@ async fn main() {
             "/error",
             get(|| async { Err::<&str, AppError>(AppError::BadRequest("Test error".to_string())) }),
         )
-        .route("/analyze", post(analyze))
+        .route("/auth/challenge", post(auth::challenge_handler))
+        .route("/auth/verify", post(auth::verify_handler))
+        .merge(protected)
+        .layer(Extension(auth_state))
         .layer(cors)
         .layer(TraceLayer::new_for_http());
 

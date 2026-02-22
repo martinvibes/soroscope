@@ -17,6 +17,9 @@ pub enum AppError {
 
     #[error("Bad request: {0}")]
     BadRequest(String),
+
+    #[error("Unauthorized: {0}")]
+    Unauthorized(String),
 }
 
 #[derive(Serialize)]
@@ -31,6 +34,7 @@ impl AppError {
             Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Self::NotFound(_) => StatusCode::NOT_FOUND,
             Self::BadRequest(_) => StatusCode::BAD_REQUEST,
+            Self::Unauthorized(_) => StatusCode::UNAUTHORIZED,
         }
     }
 
@@ -39,6 +43,7 @@ impl AppError {
             Self::Internal(_) => "INTERNAL_SERVER_ERROR",
             Self::NotFound(_) => "NOT_FOUND",
             Self::BadRequest(_) => "BAD_REQUEST",
+            Self::Unauthorized(_) => "UNAUTHORIZED",
         }
     }
 }
