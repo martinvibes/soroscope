@@ -2,6 +2,7 @@ use serde::Serialize;
 
 // Export simulation module for RPC-based contract simulation
 pub mod simulation;
+pub mod parser;
 
 /// Resource report containing profiling information for a Soroban contract
 #[derive(Debug, Clone, Serialize)]
