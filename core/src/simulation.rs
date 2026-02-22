@@ -11,6 +11,12 @@ use soroban_sdk::xdr::{
 use stellar_strkey::Strkey;
 use thiserror::Error;
 
+use moka::future::Cache;
+use sha2::{Digest, Sha256};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
+
 /// Errors that can occur during simulation
 #[derive(Error, Debug)]
 pub enum SimulationError {
@@ -45,33 +51,23 @@ pub enum SimulationError {
 /// Soroban resource consumption data
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct SorobanResources {
-    /// CPU instructions consumed
     pub cpu_instructions: u64,
-    /// RAM bytes consumed
     pub ram_bytes: u64,
-    /// Ledger read bytes
     pub ledger_read_bytes: u64,
-    /// Ledger write bytes
     pub ledger_write_bytes: u64,
-    /// Transaction size in bytes
     pub transaction_size_bytes: u64,
 }
 
 /// Complete simulation result including resources and metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SimulationResult {
-    /// Resource consumption metrics
     pub resources: SorobanResources,
-    /// Transaction hash (if available)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub transaction_hash: Option<String>,
-    /// Latest ledger at time of simulation
     pub latest_ledger: u64,
-    /// Estimated cost in stroops
     pub cost_stroops: u64,
 }
 
-/// RPC request for simulating a transaction
 #[derive(Debug, Serialize)]
 struct SimulateTransactionRequest {
     jsonrpc: String,
@@ -85,7 +81,6 @@ struct SimulateTransactionParams {
     transaction: String,
 }
 
-/// RPC response from simulateTransaction endpoint
 #[derive(Debug, Deserialize)]
 struct SimulateTransactionResponse {
     #[allow(dead_code)]
@@ -133,7 +128,6 @@ struct ResourceCost {
     mem_bytes: String,
 }
 
-/// Soroban RPC simulation engine
 pub struct SimulationEngine {
     rpc_url: String,
     client: Client,
@@ -141,10 +135,6 @@ pub struct SimulationEngine {
 }
 
 impl SimulationEngine {
-    /// Create a new simulation engine
-    ///
-    /// # Arguments
-    /// * `rpc_url` - The Soroban RPC endpoint URL (e.g., https://soroban-testnet.stellar.org)
     pub fn new(rpc_url: String) -> Self {
         Self {
             rpc_url,
@@ -173,15 +163,10 @@ impl SimulationEngine {
                 "Contract ID cannot be empty".to_string(),
             ));
         }
-
-        // Create invoke transaction
         let transaction_xdr = self.create_invoke_transaction(contract_id, function_name, args)?;
-
-        // Simulate via RPC
         self.simulate_transaction(&transaction_xdr).await
     }
 
-    /// Core simulation method that calls the RPC endpoint
     async fn simulate_transaction(
         &self,
         transaction_xdr: &str,
@@ -213,7 +198,6 @@ impl SimulationEngine {
             }
         })?;
 
-        // Check HTTP status
         if !response.status().is_success() {
             return Err(SimulationError::RpcRequestFailed(format!(
                 "HTTP error: {}",
@@ -225,12 +209,9 @@ impl SimulationEngine {
             SimulationError::RpcRequestFailed(format!("Failed to parse response: {}", e))
         })?;
 
-        // Handle RPC errors
         match rpc_response.result {
             ResponseResult::Error { error } => {
                 tracing::error!("RPC error (code {}): {}", error.code, error.message);
-
-                // Specific error handling
                 match error.code {
                     -32600 => Err(SimulationError::NodeError(
                         "Invalid request format".to_string(),
@@ -259,28 +240,21 @@ impl SimulationEngine {
         }
     }
 
-    /// Parse RPC simulation result into our internal data model
     fn parse_simulation_result(
         &self,
         rpc_result: SimulationRpcResult,
     ) -> Result<SimulationResult, SimulationError> {
         let resources = if let Some(cost) = rpc_result.cost {
-            // Parse CPU instructions
             let cpu_instructions = cost.cpu_insns.parse::<u64>().unwrap_or_else(|_| {
                 tracing::warn!("Failed to parse cpu_insns, using 0");
                 0
             });
-
-            // Parse memory bytes
             let ram_bytes = cost.mem_bytes.parse::<u64>().unwrap_or_else(|_| {
                 tracing::warn!("Failed to parse mem_bytes, using 0");
                 0
             });
-
-            // Extract footprint information from transaction_data
             let (ledger_read_bytes, ledger_write_bytes) =
                 self.extract_footprint_from_xdr(&rpc_result.transaction_data);
-
             SorobanResources {
                 cpu_instructions,
                 ram_bytes,
@@ -293,9 +267,7 @@ impl SimulationEngine {
             SorobanResources::default()
         };
 
-        // Calculate estimated cost (simplified formula)
         let cost_stroops = self.calculate_cost(&resources);
-
         Ok(SimulationResult {
             resources,
             transaction_hash: None,
@@ -304,17 +276,10 @@ impl SimulationEngine {
         })
     }
 
-    /// Extract ledger footprint from XDR transaction data
-    ///
-    /// Decodes the base64-encoded SorobanTransactionData XDR and extracts
-    /// the read and write byte sizes from the footprint.
     fn extract_footprint_from_xdr(&self, transaction_data: &str) -> (u64, u64) {
         if transaction_data.is_empty() {
-            tracing::debug!("Empty transaction data, returning zero footprint");
             return (0, 0);
         }
-
-        // Decode base64 XDR string
         let xdr_bytes = match BASE64.decode(transaction_data) {
             Ok(bytes) => bytes,
             Err(e) => {
@@ -322,8 +287,6 @@ impl SimulationEngine {
                 return (0, 0);
             }
         };
-
-        // Parse the SorobanTransactionData XDR structure
         let soroban_data = match SorobanTransactionData::from_xdr(&xdr_bytes, Limits::none()) {
             Ok(data) => data,
             Err(e) => {
@@ -331,16 +294,9 @@ impl SimulationEngine {
                 return (0, 0);
             }
         };
-
-        // Extract footprint from resources
         let footprint = &soroban_data.resources.footprint;
-
-        // Calculate read bytes from read_only entries
         let read_bytes = self.calculate_ledger_keys_size(&footprint.read_only);
-
-        // Calculate write bytes from read_write entries
         let write_bytes = self.calculate_ledger_keys_size(&footprint.read_write);
-
         tracing::debug!(
             "Extracted footprint: read_only={} keys ({} bytes), read_write={} keys ({} bytes)",
             footprint.read_only.len(),
@@ -348,36 +304,21 @@ impl SimulationEngine {
             footprint.read_write.len(),
             write_bytes
         );
-
         (read_bytes, write_bytes)
     }
 
-    /// Calculate the estimated size of ledger keys in bytes
     fn calculate_ledger_keys_size(&self, ledger_keys: &soroban_sdk::xdr::VecM<LedgerKey>) -> u64 {
         let mut total_bytes: u64 = 0;
-
         for ledger_key in ledger_keys.iter() {
-            // Estimate size based on ledger key type
             let key_size = match ledger_key {
-                LedgerKey::Account(_) => {
-                    // Account keys are relatively small (account ID + sequence)
-                    56 // Approximate size
-                }
-                LedgerKey::Trustline(_) => {
-                    // Trustline keys include account + asset
-                    72
-                }
+                LedgerKey::Account(_) => 56,
+                LedgerKey::Trustline(_) => 72,
                 LedgerKey::ContractData(contract_data) => {
-                    // ContractData includes contract ID + key + durability
-                    // Size varies based on the key complexity
-                    let base_size = 32 + 4; // Contract ID + durability enum
+                    let base_size = 32 + 4;
                     let key_estimate = self.estimate_scval_size(&contract_data.key);
                     base_size + key_estimate
                 }
-                LedgerKey::ContractCode(_) => {
-                    // ContractCode is just the hash
-                    32
-                }
+                LedgerKey::ContractCode(_) => 32,
                 LedgerKey::Offer(_) => 48,
                 LedgerKey::Data(_) => 64,
                 LedgerKey::ClaimableBalance(_) => 36,
@@ -387,14 +328,11 @@ impl SimulationEngine {
             };
             total_bytes += key_size;
         }
-
         total_bytes
     }
 
-    /// Estimate the size of an ScVal in bytes
     fn estimate_scval_size(&self, scval: &soroban_sdk::xdr::ScVal) -> u64 {
         use soroban_sdk::xdr::ScVal;
-
         match scval {
             ScVal::Bool(_) => 1,
             ScVal::Void => 0,
@@ -413,9 +351,7 @@ impl SimulationEngine {
             ScVal::Vec(None) => 4,
             ScVal::Map(Some(map)) => {
                 map.iter()
-                    .map(|entry| {
-                        self.estimate_scval_size(&entry.key) + self.estimate_scval_size(&entry.val)
-                    })
+                    .map(|e| self.estimate_scval_size(&e.key) + self.estimate_scval_size(&e.val))
                     .sum::<u64>()
                     + 4
             }
@@ -423,18 +359,14 @@ impl SimulationEngine {
             ScVal::Address(_) => 32,
             ScVal::LedgerKeyContractInstance => 32,
             ScVal::LedgerKeyNonce(_) => 32,
-            ScVal::ContractInstance(_) => 64, // Estimate for contract instance
+            ScVal::ContractInstance(_) => 64,
         }
     }
 
-    /// Calculate estimated cost in stroops
     fn calculate_cost(&self, resources: &SorobanResources) -> u64 {
-        // Simplified cost calculation
-        // Real formula involves network fees, resource fees, etc.
         let cpu_cost = resources.cpu_instructions / 10000;
         let ram_cost = resources.ram_bytes / 1024;
         let ledger_cost = (resources.ledger_read_bytes + resources.ledger_write_bytes) / 1024;
-
         cpu_cost + ram_cost + ledger_cost
     }
 
@@ -447,65 +379,45 @@ impl SimulationEngine {
         function_name: &str,
         args: Vec<String>,
     ) -> Result<String, SimulationError> {
-        // Parse the contract ID (C... strkey format) to bytes
         let contract_hash = self.parse_contract_id(contract_id)?;
-
-        // Create the contract address
         let contract_address = ScAddress::Contract(Hash(contract_hash));
-
-        // Convert function name to ScSymbol
         let func_symbol: ScSymbol = function_name
             .try_into()
             .map_err(|_| SimulationError::NodeError("Invalid function name".to_string()))?;
-
-        // Convert string arguments to ScVal (currently supporting basic types)
         let sc_args: VecM<ScVal> = args
             .iter()
             .map(|arg| self.parse_sc_val_arg(arg))
             .collect::<Result<Vec<_>, _>>()?
             .try_into()
             .map_err(|_| SimulationError::NodeError("Too many arguments".to_string()))?;
-
-        // Create the InvokeContract host function
         let host_function = HostFunction::InvokeContract(InvokeContractArgs {
             contract_address,
             function_name: func_symbol,
             args: sc_args,
         });
-
-        // Build the transaction (auth will be populated after simulation)
         self.build_invoke_host_function_transaction(host_function, vec![])
     }
 
-    /// Build a transaction envelope with an InvokeHostFunctionOp
     fn build_invoke_host_function_transaction(
         &self,
         host_function: HostFunction,
         auth: Vec<SorobanAuthorizationEntry>,
     ) -> Result<String, SimulationError> {
-        // Create the InvokeHostFunctionOp
         let invoke_op = InvokeHostFunctionOp {
             host_function,
             auth: auth
                 .try_into()
                 .map_err(|_| SimulationError::XdrError("Too many auth entries".to_string()))?,
         };
-
-        // Create operation with the invoke host function
         let operation = Operation {
-            source_account: None, // Use transaction source
+            source_account: None,
             body: OperationBody::InvokeHostFunction(invoke_op),
         };
-
-        // Create a placeholder source account (32 zero bytes for simulation)
-        // In a real scenario, this would be the actual account public key
         let source_account = MuxedAccount::Ed25519(Uint256([0u8; 32]));
-
-        // Build the transaction
         let transaction = Transaction {
             source_account,
-            fee: 100,                   // Base fee in stroops
-            seq_num: SequenceNumber(0), // Placeholder sequence number
+            fee: 100,
+            seq_num: SequenceNumber(0),
             cond: Preconditions::None,
             memo: Memo::None,
             operations: vec![operation].try_into().map_err(|_| {
@@ -513,35 +425,25 @@ impl SimulationEngine {
             })?,
             ext: TransactionExt::V0,
         };
-
-        // Wrap in a transaction envelope (unsigned for simulation)
         let envelope = TransactionV1Envelope {
             tx: transaction,
-            signatures: VecM::default(), // No signatures needed for simulation
+            signatures: VecM::default(),
         };
-
-        // Encode to XDR and then base64
         let xdr_bytes = envelope
             .to_xdr(Limits::none())
             .map_err(|e| SimulationError::XdrError(format!("Failed to encode XDR: {}", e)))?;
-
         Ok(BASE64.encode(&xdr_bytes))
     }
 
-    /// Parse a contract ID from strkey format (C...) to raw bytes
     fn parse_contract_id(&self, contract_id: &str) -> Result<[u8; 32], SimulationError> {
-        // Contract IDs start with 'C' in strkey format
         if !contract_id.starts_with('C') {
             return Err(SimulationError::NodeError(
                 "Contract ID must start with 'C'".to_string(),
             ));
         }
-
-        // Use stellar-strkey crate to decode
         let strkey = Strkey::from_string(contract_id).map_err(|e| {
             SimulationError::NodeError(format!("Invalid contract ID format: {}", e))
         })?;
-
         match strkey {
             Strkey::Contract(contract) => Ok(contract.0),
             _ => Err(SimulationError::NodeError(
@@ -550,15 +452,6 @@ impl SimulationEngine {
         }
     }
 
-    /// Parse a string argument into an ScVal
-    ///
-    /// Supports common formats:
-    /// - Integers: "123" -> ScVal::I128 or ScVal::U64
-    /// - Booleans: "true"/"false" -> ScVal::Bool
-    /// - Addresses: "G..." or "C..." -> ScVal::Address
-    /// - Symbols: ":symbol_name" -> ScVal::Symbol
-    /// - Strings: "\"text\"" -> ScVal::String
-    /// - Hex bytes: "0x..." -> ScVal::Bytes
     fn parse_sc_val_arg(&self, arg: &str) -> Result<ScVal, SimulationError> {
         let arg = arg.trim();
 
@@ -605,6 +498,89 @@ impl SimulationEngine {
     }
 }
 
+// ── Cache ─────────────────────────────────────────────────────────────────────
+
+const CACHE_TTL_SECS: u64 = 3_600;
+const CACHE_MAX_CAPACITY: u64 = 1_000;
+
+/// In-memory simulation result cache backed by `moka`.
+///
+/// Cache key: `hex(sha256(contract_id ‖ function_name ‖ args_as_json))`
+/// TTL: 1 hour — balances freshness vs. RPC cost reduction.
+pub struct SimulationCache {
+    inner: Cache<String, SimulationResult>,
+    hits: AtomicU64,
+    misses: AtomicU64,
+}
+
+impl SimulationCache {
+    pub fn new() -> Arc<Self> {
+        let inner = Cache::builder()
+            .max_capacity(CACHE_MAX_CAPACITY)
+            .time_to_live(Duration::from_secs(CACHE_TTL_SECS))
+            .build();
+        Arc::new(Self {
+            inner,
+            hits: AtomicU64::new(0),
+            misses: AtomicU64::new(0),
+        })
+    }
+
+    pub fn generate_key(contract_id: &str, function_name: &str, args: &[String]) -> String {
+        let args_json = serde_json::to_string(args).unwrap_or_else(|_| "[]".to_string());
+        let input = format!("{}{}{}", contract_id, function_name, args_json);
+        let digest = Sha256::digest(input.as_bytes());
+        hex::encode(digest)
+    }
+
+    pub async fn get(&self, key: &str) -> Option<SimulationResult> {
+        let value: Option<SimulationResult> = self.inner.get(key).await;
+        if value.is_some() {
+            self.hits.fetch_add(1, Ordering::Relaxed);
+            tracing::debug!(cache.key = %key, "Cache HIT");
+        } else {
+            self.misses.fetch_add(1, Ordering::Relaxed);
+            tracing::debug!(cache.key = %key, "Cache MISS");
+        }
+        value
+    }
+
+    pub async fn set(&self, key: String, value: SimulationResult) {
+        self.inner.insert(key, value).await;
+    }
+
+    pub fn log_stats(&self) {
+        let hits = self.hits.load(Ordering::Relaxed);
+        let misses = self.misses.load(Ordering::Relaxed);
+        let total = hits + misses;
+        let hit_rate_pct = if total > 0 { hits * 100 / total } else { 0 };
+        tracing::info!(
+            cache.hits = hits,
+            cache.misses = misses,
+            cache.total = total,
+            cache.hit_rate_pct = hit_rate_pct,
+            "Cache statistics"
+        );
+    }
+}
+
+// ── Test-only helpers on SimulationCache ──────────────────────────────────────
+// Placed in a dedicated #[cfg(test)] impl block — the idiomatic Rust pattern
+// that ensures Arc<SimulationCache> deref resolves these methods correctly
+// during test compilation without polluting the public API.
+
+#[cfg(test)]
+impl SimulationCache {
+    fn hit_count(&self) -> u64 {
+        self.hits.load(Ordering::Relaxed)
+    }
+    fn miss_count(&self) -> u64 {
+        self.misses.load(Ordering::Relaxed)
+    }
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -627,13 +603,11 @@ mod tests {
             ledger_write_bytes: 256,
             transaction_size_bytes: 1024,
         };
-
         let json = serde_json::to_string(&resources).unwrap();
         assert!(json.contains("\"cpu_instructions\":1000000"));
         assert!(json.contains("\"ram_bytes\":2048"));
         assert!(json.contains("\"ledger_read_bytes\":512"));
         assert!(json.contains("\"ledger_write_bytes\":256"));
-
         let deserialized: SorobanResources = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, resources);
     }
@@ -654,8 +628,7 @@ mod tests {
             ledger_write_bytes: 512,
             transaction_size_bytes: 1024,
         };
-        let cost = engine.calculate_cost(&resources);
-        assert!(cost > 0);
+        assert!(engine.calculate_cost(&resources) > 0);
     }
 
     #[tokio::test]
@@ -682,34 +655,31 @@ mod tests {
     #[test]
     fn test_extract_footprint_empty_data() {
         let engine = SimulationEngine::new("https://test.com".to_string());
-        let (read, write) = engine.extract_footprint_from_xdr("");
-        assert_eq!(read, 0);
-        assert_eq!(write, 0);
+        assert_eq!(engine.extract_footprint_from_xdr(""), (0, 0));
     }
 
     #[test]
     fn test_extract_footprint_invalid_base64() {
         let engine = SimulationEngine::new("https://test.com".to_string());
-        let (read, write) = engine.extract_footprint_from_xdr("not-valid-base64!!!");
-        assert_eq!(read, 0);
-        assert_eq!(write, 0);
+        assert_eq!(
+            engine.extract_footprint_from_xdr("not-valid-base64!!!"),
+            (0, 0)
+        );
     }
 
     #[test]
     fn test_extract_footprint_invalid_xdr() {
         let engine = SimulationEngine::new("https://test.com".to_string());
-        // Valid base64 but invalid XDR
-        let (read, write) = engine.extract_footprint_from_xdr("SGVsbG8gV29ybGQ=");
-        assert_eq!(read, 0);
-        assert_eq!(write, 0);
+        assert_eq!(
+            engine.extract_footprint_from_xdr("SGVsbG8gV29ybGQ="),
+            (0, 0)
+        );
     }
 
     #[test]
     fn test_estimate_scval_size_primitives() {
         use soroban_sdk::xdr::ScVal;
-
         let engine = SimulationEngine::new("https://test.com".to_string());
-
         assert_eq!(engine.estimate_scval_size(&ScVal::Bool(true)), 1);
         assert_eq!(engine.estimate_scval_size(&ScVal::Void), 0);
         assert_eq!(engine.estimate_scval_size(&ScVal::U32(42)), 4);
@@ -721,59 +691,65 @@ mod tests {
     #[test]
     fn test_parse_sc_val_arg_bool() {
         let engine = SimulationEngine::new("https://test.com".to_string());
-
-        let result = engine.parse_sc_val_arg("true").unwrap();
-        assert!(matches!(result, ScVal::Bool(true)));
-
-        let result = engine.parse_sc_val_arg("false").unwrap();
-        assert!(matches!(result, ScVal::Bool(false)));
+        assert!(matches!(
+            engine.parse_sc_val_arg("true").unwrap(),
+            ScVal::Bool(true)
+        ));
+        assert!(matches!(
+            engine.parse_sc_val_arg("false").unwrap(),
+            ScVal::Bool(false)
+        ));
     }
 
     #[test]
     fn test_parse_sc_val_arg_void() {
         let engine = SimulationEngine::new("https://test.com".to_string());
-
-        let result = engine.parse_sc_val_arg("void").unwrap();
-        assert!(matches!(result, ScVal::Void));
-
-        let result = engine.parse_sc_val_arg("()").unwrap();
-        assert!(matches!(result, ScVal::Void));
+        assert!(matches!(
+            engine.parse_sc_val_arg("void").unwrap(),
+            ScVal::Void
+        ));
+        assert!(matches!(
+            engine.parse_sc_val_arg("()").unwrap(),
+            ScVal::Void
+        ));
     }
 
     #[test]
     fn test_parse_sc_val_arg_symbol() {
         let engine = SimulationEngine::new("https://test.com".to_string());
-
-        let result = engine.parse_sc_val_arg(":my_symbol").unwrap();
-        assert!(matches!(result, ScVal::Symbol(_)));
+        assert!(matches!(
+            engine.parse_sc_val_arg(":my_symbol").unwrap(),
+            ScVal::Symbol(_)
+        ));
     }
 
     #[test]
     fn test_parse_sc_val_arg_integer() {
         let engine = SimulationEngine::new("https://test.com".to_string());
-
-        let result = engine.parse_sc_val_arg("42").unwrap();
-        assert!(matches!(result, ScVal::I64(42)));
-
-        let result = engine.parse_sc_val_arg("-100").unwrap();
-        assert!(matches!(result, ScVal::I64(-100)));
+        assert!(matches!(
+            engine.parse_sc_val_arg("42").unwrap(),
+            ScVal::I64(42)
+        ));
+        assert!(matches!(
+            engine.parse_sc_val_arg("-100").unwrap(),
+            ScVal::I64(-100)
+        ));
     }
 
     #[test]
     fn test_parse_sc_val_arg_hex_bytes() {
         let engine = SimulationEngine::new("https://test.com".to_string());
-
-        let result = engine.parse_sc_val_arg("0xdeadbeef").unwrap();
-        assert!(matches!(result, ScVal::Bytes(_)));
+        assert!(matches!(
+            engine.parse_sc_val_arg("0xdeadbeef").unwrap(),
+            ScVal::Bytes(_)
+        ));
     }
 
     #[test]
     fn test_parse_contract_id_valid() {
         let engine = SimulationEngine::new("https://test.com".to_string());
-
-        // Valid contract ID format
-        let contract_id = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
-        let result = engine.parse_contract_id(contract_id);
+        let result =
+            engine.parse_contract_id("CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC");
         assert!(result.is_ok());
         assert_eq!(result.unwrap().len(), 32);
     }
@@ -790,17 +766,120 @@ mod tests {
     #[test]
     fn test_create_invoke_transaction() {
         let engine = SimulationEngine::new("https://test.com".to_string());
-
-        let contract_id = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
-        let function_name = "hello";
-        let args = vec!["true".to_string(), "42".to_string()];
-
-        let result = engine.create_invoke_transaction(contract_id, function_name, args);
+        let result = engine.create_invoke_transaction(
+            "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
+            "hello",
+            vec!["true".to_string(), "42".to_string()],
+        );
         assert!(result.is_ok());
+        assert!(BASE64.decode(result.unwrap()).is_ok());
+    }
 
-        // The result should be a valid base64 string
-        let xdr_base64 = result.unwrap();
-        assert!(!xdr_base64.is_empty());
-        assert!(BASE64.decode(&xdr_base64).is_ok());
+    // ── Cache tests ───────────────────────────────────────────────────────────
+
+    mod cache_tests {
+        use super::*;
+
+        fn make_result() -> SimulationResult {
+            SimulationResult {
+                resources: SorobanResources {
+                    cpu_instructions: 1_000,
+                    ram_bytes: 2_000,
+                    ledger_read_bytes: 512,
+                    ledger_write_bytes: 256,
+                    transaction_size_bytes: 128,
+                },
+                transaction_hash: None,
+                latest_ledger: 42,
+                cost_stroops: 10,
+            }
+        }
+
+        #[test]
+        fn test_cache_key_is_deterministic() {
+            let k1 = SimulationCache::generate_key("CONTRACT_A", "fn_x", &["arg1".to_string()]);
+            let k2 = SimulationCache::generate_key("CONTRACT_A", "fn_x", &["arg1".to_string()]);
+            assert_eq!(k1, k2);
+        }
+
+        #[test]
+        fn test_cache_key_differs_on_contract_id() {
+            let k1 = SimulationCache::generate_key("CONTRACT_A", "fn_x", &[]);
+            let k2 = SimulationCache::generate_key("CONTRACT_B", "fn_x", &[]);
+            assert_ne!(k1, k2);
+        }
+
+        #[test]
+        fn test_cache_key_differs_on_function_name() {
+            let k1 = SimulationCache::generate_key("CONTRACT_A", "fn_x", &[]);
+            let k2 = SimulationCache::generate_key("CONTRACT_A", "fn_y", &[]);
+            assert_ne!(k1, k2);
+        }
+
+        #[test]
+        fn test_cache_key_differs_on_args() {
+            let k1 = SimulationCache::generate_key("CONTRACT_A", "fn_x", &["1".to_string()]);
+            let k2 = SimulationCache::generate_key("CONTRACT_A", "fn_x", &["2".to_string()]);
+            assert_ne!(k1, k2);
+        }
+
+        #[test]
+        fn test_cache_key_is_hex_sha256() {
+            let key = SimulationCache::generate_key("C", "f", &[]);
+            assert_eq!(key.len(), 64);
+            assert!(key.chars().all(|c| c.is_ascii_hexdigit()));
+        }
+
+        #[tokio::test]
+        async fn test_cache_miss_on_empty() {
+            let cache = SimulationCache::new();
+            let result = cache.get("nonexistent_key").await;
+            assert!(result.is_none());
+            assert_eq!(cache.miss_count(), 1);
+            assert_eq!(cache.hit_count(), 0);
+        }
+
+        #[tokio::test]
+        async fn test_cache_hit_after_set() {
+            let cache = SimulationCache::new();
+            let key = "test_key".to_string();
+            cache.set(key.clone(), make_result()).await;
+            let result = cache.get(&key).await;
+            assert!(result.is_some());
+            assert_eq!(result.unwrap().latest_ledger, 42);
+            assert_eq!(cache.hit_count(), 1);
+            assert_eq!(cache.miss_count(), 0);
+        }
+
+        #[tokio::test]
+        async fn test_cache_aside_pattern() {
+            let cache = SimulationCache::new();
+            let key = SimulationCache::generate_key("CONTRACT_X", "do_thing", &[]);
+
+            let first = cache.get(&key).await;
+            assert!(first.is_none());
+            cache.set(key.clone(), make_result()).await;
+
+            let second = cache.get(&key).await;
+            assert!(second.is_some());
+
+            assert_eq!(cache.miss_count(), 1);
+            assert_eq!(cache.hit_count(), 1);
+        }
+
+        #[tokio::test]
+        async fn test_different_keys_stored_independently() {
+            let cache = SimulationCache::new();
+            let k1 = SimulationCache::generate_key("CONTRACT_A", "fn_x", &[]);
+            let k2 = SimulationCache::generate_key("CONTRACT_B", "fn_x", &[]);
+            let mut r1 = make_result();
+            let mut r2 = make_result();
+            r1.latest_ledger = 1;
+            r2.latest_ledger = 2;
+            cache.set(k1.clone(), r1).await;
+            cache.set(k2.clone(), r2).await;
+            assert_eq!(cache.get(&k1).await.unwrap().latest_ledger, 1);
+            assert_eq!(cache.get(&k2).await.unwrap().latest_ledger, 2);
+        }
     }
 }

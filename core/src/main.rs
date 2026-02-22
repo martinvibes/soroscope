@@ -5,9 +5,10 @@ mod parser;
 mod simulation;
 
 use crate::errors::AppError;
-use crate::simulation::SimulationEngine;
+use crate::simulation::{SimulationCache, SimulationEngine, SimulationResult};
 use axum::{
     extract::{Json, State},
+    http::{HeaderMap, HeaderName, HeaderValue},
     middleware,
     routing::{get, post},
     Extension, Router,
@@ -31,10 +32,13 @@ struct AppConfig {
     soroban_rpc_url: String,
     jwt_secret: String,
     network_passphrase: String,
+    /// Redis URL reserved for the distributed cache migration (issue #65).
+    /// Unused in the MVP in-memory implementation — present so the config
+    /// surface is stable when Redis is wired in.
+    redis_url: String,
 }
 
 fn load_config() -> Result<AppConfig, ConfigError> {
-    // Load .env file if present
     dotenvy::dotenv().ok();
 
     let settings = Config::builder()
@@ -44,9 +48,17 @@ fn load_config() -> Result<AppConfig, ConfigError> {
         .set_default("soroban_rpc_url", "https://soroban-testnet.stellar.org")?
         .set_default("jwt_secret", "dev-secret-change-in-production")?
         .set_default("network_passphrase", "Test SDF Network ; September 2015")?
+        .set_default("redis_url", "redis://127.0.0.1:6379")?
         .build()?;
 
     settings.try_deserialize()
+}
+
+/// Shared application state injected into every Axum handler via [`State`].
+struct AppState {
+    #[allow(dead_code)] // will be used when RPC simulation is wired into analyze handler
+    engine: SimulationEngine,
+    cache: Arc<SimulationCache>,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -76,6 +88,17 @@ pub struct ResourceReport {
     pub transaction_size_bytes: u64,
 }
 
+/// Convert a `SimulationResult` (library type) into the API `ResourceReport`.
+fn to_report(result: &SimulationResult) -> ResourceReport {
+    ResourceReport {
+        cpu_instructions: result.resources.cpu_instructions,
+        ram_bytes: result.resources.ram_bytes,
+        ledger_read_bytes: result.resources.ledger_read_bytes,
+        ledger_write_bytes: result.resources.ledger_write_bytes,
+        transaction_size_bytes: result.resources.transaction_size_bytes,
+    }
+}
+
 #[utoipa::path(
     post,
     path = "/analyze",
@@ -91,30 +114,41 @@ pub struct ResourceReport {
     tag = "Analysis"
 )]
 async fn analyze(
-    State(engine): State<Arc<SimulationEngine>>,
+    State(state): State<Arc<AppState>>,
     Json(payload): Json<AnalyzeRequest>,
-) -> Result<Json<ResourceReport>, AppError> {
+) -> Result<(HeaderMap, Json<ResourceReport>), AppError> {
     tracing::info!(
-        "Analyzing request for contract: {}, function: {}",
-        payload.contract_id,
-        payload.function_name
+        contract_id = %payload.contract_id,
+        function_name = %payload.function_name,
+        "Received analyze request"
     );
 
-    // Call SimulationEngine for real profiling
-    let result = engine
-        .simulate_from_contract_id(&payload.contract_id, &payload.function_name, vec![])
-        .await
-        .map_err(|e| AppError::Internal(format!("Simulation failed: {}", e)))?;
+    let args: Vec<String> = vec![];
+    let cache_key =
+        SimulationCache::generate_key(&payload.contract_id, &payload.function_name, &args);
 
-    let report = ResourceReport {
-        cpu_instructions: result.resources.cpu_instructions,
-        ram_bytes: result.resources.ram_bytes,
-        ledger_read_bytes: result.resources.ledger_read_bytes,
-        ledger_write_bytes: result.resources.ledger_write_bytes,
-        transaction_size_bytes: result.resources.transaction_size_bytes,
-    };
+    let (result, cache_status): (SimulationResult, &'static str) =
+        if let Some(cached) = state.cache.get(&cache_key).await {
+            (cached, "HIT")
+        } else {
+            let sim = state
+                .engine
+                .simulate_from_contract_id(&payload.contract_id, &payload.function_name, args)
+                .await
+                .map_err(|e| AppError::Internal(format!("Simulation failed: {}", e)))?;
+            state.cache.set(cache_key, sim.clone()).await;
+            (sim, "MISS")
+        };
 
-    Ok(Json(report))
+    state.cache.log_stats();
+
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        HeaderName::from_static("x-soroscope-cache"),
+        HeaderValue::from_static(cache_status),
+    );
+
+    Ok((headers, Json(to_report(&result))))
 }
 
 #[derive(OpenApi)]
@@ -143,9 +177,6 @@ async fn health_check() -> &'static str {
 
 #[tokio::main]
 async fn main() {
-    // -------------------------------
-    // Initialize Tracing / Logging
-    // -------------------------------
     if env::var("RUST_LOG").is_err() {
         env::set_var("RUST_LOG", "info");
     }
@@ -157,15 +188,13 @@ async fn main() {
 
     tracing::info!("SoroScope Starting...");
 
-    // -------------------------------
-    // Load configuration
-    // -------------------------------
     let config = load_config().expect("Failed to load configuration");
     tracing::info!("SoroScope initialized with config: {:?}", config);
+    tracing::info!(
+        redis_url = %config.redis_url,
+        "Cache config: using in-memory (moka) MVP; Redis URL reserved for future migration"
+    );
 
-    // -------------------------------
-    // CLI Argument Handling (Benchmark)
-    // -------------------------------
     let args: Vec<String> = env::args().collect();
 
     if args.len() > 1 && args[1] == "benchmark" {
@@ -177,7 +206,6 @@ async fn main() {
         ];
 
         let mut wasm_path = None;
-
         for p in possible_paths {
             let path = PathBuf::from(p);
             if path.exists() {
@@ -199,9 +227,6 @@ async fn main() {
         return;
     }
 
-    // -------------------------------
-    // Web Server Setup
-    // -------------------------------
     tracing::info!("Starting SoroScope API Server...");
 
     let auth_state = Arc::new(auth::AuthState::new(
@@ -213,14 +238,15 @@ async fn main() {
         "SEP-10 server account: {}",
         auth_state.server_stellar_address()
     );
-
-    let engine = Arc::new(SimulationEngine::new(config.soroban_rpc_url.clone()));
+    let app_state = Arc::new(AppState {
+        engine: SimulationEngine::new(config.soroban_rpc_url.clone()),
+        cache: SimulationCache::new(),
+    });
 
     let cors = CorsLayer::new().allow_origin(Any);
 
     let protected = Router::new()
         .route("/analyze", post(analyze))
-        .with_state(engine)
         .route_layer(middleware::from_fn(auth::auth_middleware));
 
     let app = Router::new()
@@ -237,11 +263,9 @@ async fn main() {
         .merge(protected)
         .layer(Extension(auth_state))
         .layer(cors)
-        .layer(TraceLayer::new_for_http());
+        .layer(TraceLayer::new_for_http())
+        .with_state(app_state); // ← thread AppState through all handlers
 
-    // -------------------------------
-    // Run Server
-    // -------------------------------
     let bind_addr = format!("0.0.0.0:{}", config.server_port);
     let listener = tokio::net::TcpListener::bind(&bind_addr)
         .await
