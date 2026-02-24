@@ -15,6 +15,7 @@ use axum::{
 };
 use config::{Config, ConfigError};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::env;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -61,12 +62,16 @@ struct AppState {
     cache: Arc<SimulationCache>,
 }
 
-#[derive(Deserialize, ToSchema)]
-struct AnalyzeRequest {
-    #[schema(example = "0x1234...")]
-    contract_id: String,
-    #[schema(example = "invoke")]
-    function_name: String,
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct AnalyzeRequest {
+    #[schema(example = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC")]
+    pub contract_id: String,
+    #[schema(example = "hello")]
+    pub function_name: String,
+    #[schema(example = "[]")]
+    pub args: Option<Vec<String>>,
+    /// Map of Key-Base64 to Value-Base64 ledger entry overrides
+    pub ledger_overrides: Option<HashMap<String, String>>,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -86,6 +91,14 @@ pub struct ResourceReport {
     /// Transaction size in bytes
     #[schema(example = 450)]
     pub transaction_size_bytes: u64,
+    /// Report showing which data was injected vs live
+    pub state_dependency: Option<Vec<StateDependencyReport>>,
+}
+
+#[derive(Serialize, ToSchema, Debug)]
+pub struct StateDependencyReport {
+    pub key: String,
+    pub source: String,
 }
 
 /// Convert a `SimulationResult` (library type) into the API `ResourceReport`.
@@ -96,6 +109,14 @@ fn to_report(result: &SimulationResult) -> ResourceReport {
         ledger_read_bytes: result.resources.ledger_read_bytes,
         ledger_write_bytes: result.resources.ledger_write_bytes,
         transaction_size_bytes: result.resources.transaction_size_bytes,
+        state_dependency: result.state_dependency.as_ref().map(|deps| {
+            deps.iter()
+                .map(|d| StateDependencyReport {
+                    key: d.key.clone(),
+                    source: format!("{:?}", d.source),
+                })
+                .collect()
+        }),
     }
 }
 
@@ -123,7 +144,7 @@ async fn analyze(
         "Received analyze request"
     );
 
-    let args: Vec<String> = vec![];
+    let args = payload.args.clone().unwrap_or_default();
     let cache_key =
         SimulationCache::generate_key(&payload.contract_id, &payload.function_name, &args);
 
@@ -131,9 +152,14 @@ async fn analyze(
         if let Some(cached) = state.cache.get(&cache_key).await {
             (cached, "HIT")
         } else {
-            let sim = state
+            let sim: SimulationResult = state
                 .engine
-                .simulate_from_contract_id(&payload.contract_id, &payload.function_name, args)
+                .simulate_from_contract_id(
+                    &payload.contract_id,
+                    &payload.function_name,
+                    args,
+                    payload.ledger_overrides.clone(),
+                )
                 .await
                 .map_err(|e| AppError::Internal(format!("Simulation failed: {}", e)))?;
             state.cache.set(cache_key, sim.clone()).await;
