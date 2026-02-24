@@ -1,10 +1,13 @@
 mod auth;
 mod benchmarks;
 mod errors;
+mod parser;
+mod simulation;
 
 use crate::errors::AppError;
+use crate::simulation::SimulationEngine;
 use axum::{
-    extract::Json,
+    extract::{Json, State},
     middleware,
     routing::{get, post},
     Extension, Router,
@@ -55,15 +58,22 @@ struct AnalyzeRequest {
 }
 
 #[derive(Serialize, ToSchema)]
-struct ResourceReport {
-    #[schema(example = 1000)]
-    cpu_instructions: u64,
-    #[schema(example = 2048)]
-    memory_bytes: u64,
+pub struct ResourceReport {
+    /// CPU instructions consumed
+    #[schema(example = 1500)]
+    pub cpu_instructions: u64,
+    /// RAM bytes consumed
+    #[schema(example = 3000)]
+    pub ram_bytes: u64,
+    /// Ledger read bytes
+    #[schema(example = 1024)]
+    pub ledger_read_bytes: u64,
+    /// Ledger write bytes
     #[schema(example = 512)]
-    ledger_read_bytes: u64,
-    #[schema(example = 256)]
-    ledger_write_bytes: u64,
+    pub ledger_write_bytes: u64,
+    /// Transaction size in bytes
+    #[schema(example = 450)]
+    pub transaction_size_bytes: u64,
 }
 
 #[utoipa::path(
@@ -72,25 +82,38 @@ struct ResourceReport {
     request_body = AnalyzeRequest,
     responses(
         (status = 200, description = "Resource analysis successful", body = ResourceReport),
+        (status = 401, description = "Unauthorized"),
         (status = 500, description = "Analysis failed")
+    ),
+    security(
+        ("jwt" = [])
     ),
     tag = "Analysis"
 )]
-async fn analyze(Json(payload): Json<AnalyzeRequest>) -> Result<Json<ResourceReport>, AppError> {
+async fn analyze(
+    State(engine): State<Arc<SimulationEngine>>,
+    Json(payload): Json<AnalyzeRequest>,
+) -> Result<Json<ResourceReport>, AppError> {
     tracing::info!(
         "Analyzing request for contract: {}, function: {}",
         payload.contract_id,
         payload.function_name
     );
 
-    // Placeholder: This will eventually call SimulationEngine
-    // For now, we return a success response that matches the expected frontend structure
+    // Call SimulationEngine for real profiling
+    let result = engine
+        .simulate_from_contract_id(&payload.contract_id, &payload.function_name, vec![])
+        .await
+        .map_err(|e| AppError::Internal(format!("Simulation failed: {}", e)))?;
+
     let report = ResourceReport {
-        cpu_instructions: 1500,
-        memory_bytes: 3000,
-        ledger_read_bytes: 1024,
-        ledger_write_bytes: 512,
+        cpu_instructions: result.resources.cpu_instructions,
+        ram_bytes: result.resources.ram_bytes,
+        ledger_read_bytes: result.resources.ledger_read_bytes,
+        ledger_write_bytes: result.resources.ledger_write_bytes,
+        transaction_size_bytes: result.resources.transaction_size_bytes,
     };
+
     Ok(Json(report))
 }
 
@@ -191,10 +214,13 @@ async fn main() {
         auth_state.server_stellar_address()
     );
 
+    let engine = Arc::new(SimulationEngine::new(config.soroban_rpc_url.clone()));
+
     let cors = CorsLayer::new().allow_origin(Any);
 
     let protected = Router::new()
         .route("/analyze", post(analyze))
+        .with_state(engine)
         .route_layer(middleware::from_fn(auth::auth_middleware));
 
     let app = Router::new()
@@ -206,10 +232,6 @@ async fn main() {
             }),
         )
         .route("/health", get(health_check))
-        .route(
-            "/error",
-            get(|| async { Err::<&str, AppError>(AppError::BadRequest("Test error".to_string())) }),
-        )
         .route("/auth/challenge", post(auth::challenge_handler))
         .route("/auth/verify", post(auth::verify_handler))
         .merge(protected)

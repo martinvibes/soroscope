@@ -7,11 +7,9 @@ use soroban_sdk::xdr::{
     SequenceNumber, SorobanAuthorizationEntry, SorobanTransactionData, Transaction,
     TransactionExt, TransactionV1Envelope, Uint256, VecM, WriteXdr,
 };
-use std::path::Path;
 use stellar_strkey::Strkey;
 use thiserror::Error;
 use crate::parser::ArgParser;
-use tokio::fs;
 
 /// Errors that can occur during simulation
 #[derive(Error, Debug)]
@@ -25,11 +23,8 @@ pub enum SimulationError {
     #[error("RPC node timeout")]
     NodeTimeout,
 
-    #[error("Invalid contract: {0}")]
-    InvalidContract(String),
-
-    #[error("Invalid WASM file: {0}")]
-    InvalidWasm(String),
+    #[error("Node returned an error: {0}")]
+    NodeError(String),
 
     #[error("Serialization error: {0}")]
     SerializationError(#[from] serde_json::Error),
@@ -164,35 +159,6 @@ impl SimulationEngine {
         self
     }
 
-    /// Simulate transaction from a WASM file
-    ///
-    /// # Arguments
-    /// * `wasm_path` - Path to the .wasm contract file
-    ///
-    /// # Returns
-    /// A `Result` containing `SimulationResult` on success, or `SimulationError` on failure
-    pub async fn simulate_from_wasm<P: AsRef<Path>>(
-        &self,
-        wasm_path: P,
-    ) -> Result<SimulationResult, SimulationError> {
-        // Read WASM file
-        let wasm_bytes = fs::read(wasm_path.as_ref()).await.map_err(|e| {
-            SimulationError::InvalidWasm(format!("Failed to read WASM file: {}", e))
-        })?;
-
-        // Validate WASM
-        self.validate_wasm(&wasm_bytes)?;
-
-        // Encode WASM to base64 for transmission
-        let wasm_base64 = BASE64.encode(&wasm_bytes);
-
-        // Create transaction envelope (simplified for simulation)
-        let transaction_xdr = self.create_upload_transaction(&wasm_base64)?;
-
-        // Simulate via RPC
-        self.simulate_transaction(&transaction_xdr).await
-    }
-
     /// Simulate transaction from a deployed contract ID
     ///
     /// # Arguments
@@ -209,7 +175,7 @@ impl SimulationEngine {
         args: Vec<String>,
     ) -> Result<SimulationResult, SimulationError> {
         if contract_id.is_empty() {
-            return Err(SimulationError::InvalidContract(
+            return Err(SimulationError::NodeError(
                 "Contract ID cannot be empty".to_string(),
             ));
         }
@@ -272,13 +238,13 @@ impl SimulationEngine {
 
                 // Specific error handling
                 match error.code {
-                    -32600 => Err(SimulationError::InvalidContract(
+                    -32600 => Err(SimulationError::NodeError(
                         "Invalid request format".to_string(),
                     )),
                     -32601 => Err(SimulationError::RpcRequestFailed(
                         "Method not found".to_string(),
                     )),
-                    -32602 => Err(SimulationError::InvalidContract(format!(
+                    -32602 => Err(SimulationError::NodeError(format!(
                         "Invalid parameters: {}",
                         error.message
                     ))),
@@ -478,45 +444,6 @@ impl SimulationEngine {
         cpu_cost + ram_cost + ledger_cost
     }
 
-    /// Validate WASM bytecode
-    fn validate_wasm(&self, wasm: &[u8]) -> Result<(), SimulationError> {
-        if wasm.is_empty() {
-            return Err(SimulationError::InvalidWasm(
-                "WASM bytecode is empty".to_string(),
-            ));
-        }
-
-        // Check WASM magic number (0x00 0x61 0x73 0x6D)
-        if wasm.len() < 4 || &wasm[0..4] != b"\0asm" {
-            return Err(SimulationError::InvalidWasm(
-                "Invalid WASM magic number".to_string(),
-            ));
-        }
-
-        Ok(())
-    }
-
-    /// Create a simplified upload transaction for WASM simulation
-    ///
-    /// Creates a transaction with InvokeHostFunctionOp containing UploadWasm host function.
-    /// Uses a placeholder source account since simulation doesn't require a real signature.
-    fn create_upload_transaction(&self, wasm_base64: &str) -> Result<String, SimulationError> {
-        // Decode the WASM from base64
-        let wasm_bytes = BASE64.decode(wasm_base64).map_err(|e| {
-            SimulationError::XdrError(format!("Failed to decode WASM base64: {}", e))
-        })?;
-
-        // Create the UploadWasm host function
-        let host_function = HostFunction::UploadContractWasm(
-            wasm_bytes
-                .try_into()
-                .map_err(|_| SimulationError::InvalidWasm("WASM too large".to_string()))?,
-        );
-
-        // Build the transaction with a placeholder source account
-        self.build_invoke_host_function_transaction(host_function, vec![])
-    }
-
     /// Create invoke transaction for contract call
     ///
     /// Creates a transaction with InvokeHostFunctionOp containing InvokeContract host function.
@@ -535,7 +462,7 @@ impl SimulationEngine {
         // Convert function name to ScSymbol
         let func_symbol: ScSymbol = function_name
             .try_into()
-            .map_err(|_| SimulationError::InvalidContract("Invalid function name".to_string()))?;
+            .map_err(|_| SimulationError::NodeError("Invalid function name".to_string()))?;
 
         // Convert string arguments to ScVal (currently supporting basic types)
         let sc_args: VecM<ScVal> = args
@@ -543,7 +470,7 @@ impl SimulationEngine {
             .map(|arg| self.parse_sc_val_arg(arg))
             .collect::<Result<Vec<_>, _>>()?
             .try_into()
-            .map_err(|_| SimulationError::InvalidContract("Too many arguments".to_string()))?;
+            .map_err(|_| SimulationError::NodeError("Too many arguments".to_string()))?;
 
         // Create the InvokeContract host function
         let host_function = HostFunction::InvokeContract(InvokeContractArgs {
@@ -611,19 +538,19 @@ impl SimulationEngine {
     fn parse_contract_id(&self, contract_id: &str) -> Result<[u8; 32], SimulationError> {
         // Contract IDs start with 'C' in strkey format
         if !contract_id.starts_with('C') {
-            return Err(SimulationError::InvalidContract(
+            return Err(SimulationError::NodeError(
                 "Contract ID must start with 'C'".to_string(),
             ));
         }
 
         // Use stellar-strkey crate to decode
         let strkey = Strkey::from_string(contract_id).map_err(|e| {
-            SimulationError::InvalidContract(format!("Invalid contract ID format: {}", e))
+            SimulationError::NodeError(format!("Invalid contract ID format: {}", e))
         })?;
 
         match strkey {
             Strkey::Contract(contract) => Ok(contract.0),
-            _ => Err(SimulationError::InvalidContract(
+            _ => Err(SimulationError::NodeError(
                 "Expected contract address".to_string(),
             )),
         }
@@ -675,27 +602,8 @@ impl SimulationEngine {
         // 5. Default fallback: Treat as Symbol (standard Soroban behavior for unquoted strings)
         let symbol: ScSymbol = arg
             .try_into()
-            .map_err(|_| SimulationError::InvalidContract(format!("Cannot parse argument: {}", arg)))?;
+            .map_err(|_| SimulationError::NodeError(format!("Cannot parse argument: {}", arg)))?;
         Ok(ScVal::Symbol(symbol))
-    }
-
-    /// Parse an address string to ScAddress
-    fn parse_address(&self, address: &str) -> Result<ScAddress, SimulationError> {
-        let strkey = Strkey::from_string(address).map_err(|e| {
-            SimulationError::InvalidContract(format!("Invalid address format: {}", e))
-        })?;
-
-        match strkey {
-            Strkey::Contract(contract) => Ok(ScAddress::Contract(Hash(contract.0))),
-            Strkey::PublicKeyEd25519(pubkey) => {
-                Ok(ScAddress::Account(soroban_sdk::xdr::AccountId(
-                    soroban_sdk::xdr::PublicKey::PublicKeyTypeEd25519(Uint256(pubkey.0)),
-                )))
-            }
-            _ => Err(SimulationError::InvalidContract(
-                "Address must be a contract (C...) or account (G...) address".to_string(),
-            )),
-        }
     }
 }
 
@@ -747,27 +655,6 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_wasm_empty() {
-        let engine = SimulationEngine::new("https://test.com".to_string());
-        let result = engine.validate_wasm(&[]);
-        assert!(matches!(result, Err(SimulationError::InvalidWasm(_))));
-    }
-
-    #[test]
-    fn test_validate_wasm_invalid_magic() {
-        let engine = SimulationEngine::new("https://test.com".to_string());
-        let result = engine.validate_wasm(b"invalid");
-        assert!(matches!(result, Err(SimulationError::InvalidWasm(_))));
-    }
-
-    #[test]
-    fn test_validate_wasm_valid() {
-        let engine = SimulationEngine::new("https://test.com".to_string());
-        let result = engine.validate_wasm(b"\0asm\x01\0\0\0");
-        assert!(result.is_ok());
-    }
-
-    #[test]
     fn test_calculate_cost() {
         let engine = SimulationEngine::new("https://test.com".to_string());
         let resources = SorobanResources {
@@ -787,7 +674,7 @@ mod tests {
         let result = engine
             .simulate_from_contract_id("", "test_function", vec![])
             .await;
-        assert!(matches!(result, Err(SimulationError::InvalidContract(_))));
+        assert!(matches!(result, Err(SimulationError::NodeError(_))));
     }
 
     #[test]
@@ -795,8 +682,8 @@ mod tests {
         let err = SimulationError::NodeTimeout;
         assert_eq!(err.to_string(), "RPC node timeout");
 
-        let err = SimulationError::InvalidContract("test".to_string());
-        assert_eq!(err.to_string(), "Invalid contract: test");
+        let err = SimulationError::NodeError("test".to_string());
+        assert_eq!(err.to_string(), "Node returned an error: test");
 
         let err = SimulationError::XdrError("invalid xdr".to_string());
         assert_eq!(err.to_string(), "XDR decode error: invalid xdr");
@@ -907,42 +794,7 @@ mod tests {
 
         let result =
             engine.parse_contract_id("GDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC");
-        assert!(matches!(result, Err(SimulationError::InvalidContract(_))));
-    }
-
-    #[test]
-    fn test_parse_address_contract() {
-        let engine = SimulationEngine::new("https://test.com".to_string());
-
-        let contract_id = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
-        let result = engine.parse_address(contract_id);
-        assert!(result.is_ok());
-        assert!(matches!(result.unwrap(), ScAddress::Contract(_)));
-    }
-
-    #[test]
-    fn test_parse_address_account() {
-        let engine = SimulationEngine::new("https://test.com".to_string());
-
-        let account_id = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN7";
-        let result = engine.parse_address(account_id);
-        assert!(result.is_ok());
-        assert!(matches!(result.unwrap(), ScAddress::Account(_)));
-    }
-
-    #[test]
-    fn test_create_upload_transaction() {
-        let engine = SimulationEngine::new("https://test.com".to_string());
-
-        // Valid WASM bytes encoded in base64
-        let wasm_base64 = BASE64.encode(b"\0asm\x01\0\0\0");
-        let result = engine.create_upload_transaction(&wasm_base64);
-        assert!(result.is_ok());
-
-        // The result should be a valid base64 string
-        let xdr_base64 = result.unwrap();
-        assert!(!xdr_base64.is_empty());
-        assert!(BASE64.decode(&xdr_base64).is_ok());
+        assert!(matches!(result, Err(SimulationError::NodeError(_))));
     }
 
     #[test]
