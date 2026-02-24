@@ -297,7 +297,7 @@ impl SimulationEngine {
             resources,
             transaction_hash: None,
             latest_ledger: rpc_result.latest_ledger,
-            cost_stroops: cost_stroops,
+            cost_stroops,
             state_dependency: None,
         })
     }
