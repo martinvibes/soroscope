@@ -1,15 +1,15 @@
+use crate::parser::ArgParser;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use soroban_sdk::xdr::{
     Hash, HostFunction, InvokeContractArgs, InvokeHostFunctionOp, LedgerKey, Limits, Memo,
     MuxedAccount, Operation, OperationBody, Preconditions, ReadXdr, ScAddress, ScSymbol, ScVal,
-    SequenceNumber, SorobanAuthorizationEntry, SorobanTransactionData, Transaction,
-    TransactionExt, TransactionV1Envelope, Uint256, VecM, WriteXdr,
+    SequenceNumber, SorobanAuthorizationEntry, SorobanTransactionData, Transaction, TransactionExt,
+    TransactionV1Envelope, Uint256, VecM, WriteXdr,
 };
 use stellar_strkey::Strkey;
 use thiserror::Error;
-use crate::parser::ArgParser;
 
 /// Errors that can occur during simulation
 #[derive(Error, Debug)]
@@ -153,11 +153,6 @@ impl SimulationEngine {
         }
     }
 
-    /// Set custom request timeout
-    pub fn with_timeout(mut self, timeout: std::time::Duration) -> Self {
-        self.request_timeout = timeout;
-        self
-    }
 
     /// Simulate transaction from a deployed contract ID
     ///
@@ -586,7 +581,11 @@ impl SimulationEngine {
 
         // 3. Delegation to ArgParser for special types (Addresses, Symbols, Hex)
         // If it starts with G, C, :, or 0x, we try to parse it as a quoted string
-        if arg.starts_with('G') || arg.starts_with('C') || arg.starts_with(':') || arg.starts_with("0x") {
+        if arg.starts_with('G')
+            || arg.starts_with('C')
+            || arg.starts_with(':')
+            || arg.starts_with("0x")
+        {
             if let Ok(val) = ArgParser::parse(&format!("\"{}\"", arg)) {
                 return Ok(val);
             }
@@ -646,13 +645,6 @@ mod tests {
         assert_eq!(engine.rpc_url, "https://soroban-testnet.stellar.org");
     }
 
-    #[test]
-    fn test_simulation_engine_with_timeout() {
-        let timeout = std::time::Duration::from_secs(60);
-        let engine = SimulationEngine::new("https://soroban-testnet.stellar.org".to_string())
-            .with_timeout(timeout);
-        assert_eq!(engine.request_timeout, timeout);
-    }
 
     #[test]
     fn test_calculate_cost() {

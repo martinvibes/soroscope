@@ -712,7 +712,7 @@ impl LiquidityPool {
         // Check allowance
         let current_allowance = Self::allowance(e.clone(), from.clone(), spender.clone());
         if current_allowance < amount {
-            return Err(Error::InsufficientAllowance); 
+            return Err(Error::InsufficientAllowance);
         }
 
         // Update allowance (decrement by amount)
@@ -724,7 +724,11 @@ impl LiquidityPool {
 
         if new_allowance > 0 {
             // Update existing allowance (preserve expiration)
-            let current_val = e.storage().persistent().get::<_, AllowanceValue>(&allowance_key).unwrap();
+            let current_val = e
+                .storage()
+                .persistent()
+                .get::<_, AllowanceValue>(&allowance_key)
+                .unwrap();
             let allowance_value = AllowanceValue {
                 amount: new_allowance,
                 expiration_ledger: current_val.expiration_ledger,
