@@ -1,10 +1,12 @@
 mod auth;
 mod benchmarks;
 mod errors;
+pub mod network_config;
 mod parser;
 mod simulation;
 
 use crate::errors::AppError;
+use crate::network_config::NetworkConfig;
 use crate::simulation::{SimulationCache, SimulationEngine, SimulationResult};
 use axum::{
     extract::{Json, State},
@@ -72,6 +74,23 @@ pub struct AnalyzeRequest {
     pub args: Option<Vec<String>>,
     /// Map of Key-Base64 to Value-Base64 ledger entry overrides
     pub ledger_overrides: Option<HashMap<String, String>>,
+    /// Shadow network configuration for protocol upgrade impact analysis.
+    ///
+    /// Accepts either:
+    /// - A preset name: `"protocol_21"`, `"p21"`, `"current"`,
+    ///   `"protocol_22"`, `"p22"`, `"next"`, `"custom"`, `"private"`
+    /// - A full `NetworkConfig` JSON object with custom parameters
+    pub network_config: Option<NetworkConfigInput>,
+}
+
+/// Flexible input: either a preset name or a full custom config object.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(untagged)]
+pub enum NetworkConfigInput {
+    /// A preset name like `"protocol_22"` or `"next"`.
+    Preset(String),
+    /// A full custom configuration object.
+    Custom(NetworkConfig),
 }
 
 #[derive(Serialize, ToSchema)]
@@ -93,6 +112,10 @@ pub struct ResourceReport {
     pub transaction_size_bytes: u64,
     /// Report showing which data was injected vs live
     pub state_dependency: Option<Vec<StateDependencyReport>>,
+    /// Protocol upgrade impact comparison (present when `network_config` was
+    /// supplied in the request).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub protocol_impact: Option<serde_json::Value>,
 }
 
 #[derive(Serialize, ToSchema, Debug)]
@@ -117,6 +140,10 @@ fn to_report(result: &SimulationResult) -> ResourceReport {
                 })
                 .collect()
         }),
+        protocol_impact: result
+            .protocol_impact
+            .as_ref()
+            .and_then(|impact| serde_json::to_value(impact).ok()),
     }
 }
 
@@ -145,6 +172,23 @@ async fn analyze(
     );
 
     let args = payload.args.clone().unwrap_or_default();
+
+    // Resolve the optional shadow network config.
+    let shadow_config: Option<NetworkConfig> = match &payload.network_config {
+        Some(NetworkConfigInput::Preset(name)) => {
+            let cfg = network_config::resolve_preset(name).ok_or_else(|| {
+                AppError::BadRequest(format!(
+                    "Unknown network config preset '{}'. \
+                     Valid presets: protocol_21, p21, current, protocol_22, p22, next, upcoming, custom, private",
+                    name
+                ))
+            })?;
+            Some(cfg)
+        }
+        Some(NetworkConfigInput::Custom(cfg)) => Some(cfg.clone()),
+        None => None,
+    };
+
     let cache_key =
         SimulationCache::generate_key(&payload.contract_id, &payload.function_name, &args);
 
@@ -159,6 +203,7 @@ async fn analyze(
                     &payload.function_name,
                     args,
                     payload.ledger_overrides.clone(),
+                    shadow_config,
                 )
                 .await
                 .map_err(|e| AppError::Internal(format!("Simulation failed: {}", e)))?;
