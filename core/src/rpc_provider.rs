@@ -127,7 +127,10 @@ impl ProviderRegistry {
 
     /// Spawn a background Tokio task that periodically probes every provider
     /// with `getLatestLedger`.
-    pub fn spawn_health_checker(self: &Arc<Self>, interval: Duration) -> tokio::task::JoinHandle<()> {
+    pub fn spawn_health_checker(
+        self: &Arc<Self>,
+        interval: Duration,
+    ) -> tokio::task::JoinHandle<()> {
         let registry = Arc::clone(self);
         tokio::spawn(async move {
             let mut ticker = tokio::time::interval(interval);
@@ -190,7 +193,8 @@ impl ProviderRegistry {
         let mut req = self.client.post(&state.provider.url).json(&body);
 
         // Attach provider-specific auth header if configured.
-        if let (Some(header), Some(value)) = (&state.provider.auth_header, &state.provider.auth_value)
+        if let (Some(header), Some(value)) =
+            (&state.provider.auth_header, &state.provider.auth_value)
         {
             req = req.header(header.as_str(), value.as_str());
         }

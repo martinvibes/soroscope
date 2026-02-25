@@ -327,8 +327,7 @@ async fn main() {
     let registry = ProviderRegistry::new(providers);
 
     // Spawn background health checker.
-    let health_interval =
-        std::time::Duration::from_secs(config.health_check_interval_secs);
+    let health_interval = std::time::Duration::from_secs(config.health_check_interval_secs);
     let _health_handle = registry.spawn_health_checker(health_interval);
     tracing::info!(
         interval_secs = config.health_check_interval_secs,
