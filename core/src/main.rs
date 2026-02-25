@@ -1,13 +1,14 @@
 mod auth;
 mod benchmarks;
 mod errors;
+pub mod insights;
 mod parser;
 pub mod rpc_provider;
 mod simulation;
 
 use crate::errors::AppError;
+use crate::insights::InsightsEngine;
 use crate::rpc_provider::{ProviderRegistry, RpcProvider};
-use crate::network_config::NetworkConfig;
 use crate::simulation::{SimulationCache, SimulationEngine, SimulationResult};
 use axum::{
     extract::{Json, State},
@@ -116,6 +117,7 @@ struct AppState {
     #[allow(dead_code)] // will be used when RPC simulation is wired into analyze handler
     engine: SimulationEngine,
     cache: Arc<SimulationCache>,
+    insights_engine: InsightsEngine,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -149,6 +151,26 @@ pub struct ResourceReport {
     pub transaction_size_bytes: u64,
     /// Report showing which data was injected vs live
     pub state_dependency: Option<Vec<StateDependencyReport>>,
+    /// Efficiency score (0–100) and optimisation insights.
+    pub nutrition: NutritionReport,
+}
+
+/// "Nutrition label" for the contract invocation.
+#[derive(Serialize, ToSchema)]
+pub struct NutritionReport {
+    /// Weighted efficiency score (0 = poor, 100 = optimal).
+    pub efficiency_score: u32,
+    /// Actionable optimisation insights.
+    pub insights: Vec<InsightEntry>,
+}
+
+/// A single optimisation insight.
+#[derive(Serialize, ToSchema)]
+pub struct InsightEntry {
+    pub severity: String,
+    pub rule: String,
+    pub message: String,
+    pub suggested_fix: String,
 }
 
 #[derive(Serialize, ToSchema, Debug)]
@@ -158,7 +180,9 @@ pub struct StateDependencyReport {
 }
 
 /// Convert a `SimulationResult` (library type) into the API `ResourceReport`.
-fn to_report(result: &SimulationResult) -> ResourceReport {
+fn to_report(result: &SimulationResult, insights_engine: &InsightsEngine) -> ResourceReport {
+    let insights_report = insights_engine.analyze(&result.resources);
+
     ResourceReport {
         cpu_instructions: result.resources.cpu_instructions,
         ram_bytes: result.resources.ram_bytes,
@@ -173,6 +197,19 @@ fn to_report(result: &SimulationResult) -> ResourceReport {
                 })
                 .collect()
         }),
+        nutrition: NutritionReport {
+            efficiency_score: insights_report.efficiency_score,
+            insights: insights_report
+                .insights
+                .into_iter()
+                .map(|i| InsightEntry {
+                    severity: format!("{:?}", i.severity),
+                    rule: i.rule,
+                    message: i.message,
+                    suggested_fix: i.suggested_fix,
+                })
+                .collect(),
+        },
     }
 }
 
@@ -230,7 +267,7 @@ async fn analyze(
         HeaderValue::from_static(cache_status),
     );
 
-    Ok((headers, Json(to_report(&result))))
+    Ok((headers, Json(to_report(&result, &state.insights_engine))))
 }
 
 #[derive(OpenApi)]
@@ -338,6 +375,7 @@ async fn main() {
     let app_state = Arc::new(AppState {
         engine: SimulationEngine::with_registry(Arc::clone(&registry)),
         cache: SimulationCache::new(),
+        insights_engine: InsightsEngine::new(),
     });
 
     let cors = CorsLayer::new().allow_origin(Any);

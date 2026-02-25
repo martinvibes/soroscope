@@ -482,6 +482,7 @@ impl SimulationEngine {
         total_bytes
     }
 
+    #[allow(clippy::only_used_in_recursion)]
     fn estimate_scval_size(&self, scval: &soroban_sdk::xdr::ScVal) -> u64 {
         use soroban_sdk::xdr::ScVal;
         match scval {
