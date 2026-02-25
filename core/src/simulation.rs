@@ -1,4 +1,3 @@
-use crate::network_config::{self, NetworkConfig, ProtocolImpact};
 use crate::parser::ArgParser;
 use crate::rpc_provider::ProviderRegistry;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
@@ -71,10 +70,6 @@ pub struct SimulationResult {
     pub cost_stroops: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub state_dependency: Option<Vec<StateDependency>>,
-    /// Present when a shadow network config was requested — shows cost
-    /// comparison between the baseline (Protocol 21) and the shadow config.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub protocol_impact: Option<ProtocolImpact>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -195,7 +190,6 @@ impl SimulationEngine {
         function_name: &str,
         args: Vec<String>,
         ledger_overrides: Option<HashMap<String, String>>,
-        shadow_config: Option<NetworkConfig>,
     ) -> Result<SimulationResult, SimulationError> {
         if contract_id.is_empty() {
             return Err(SimulationError::NodeError(
@@ -205,25 +199,14 @@ impl SimulationEngine {
 
         if let Some(overrides) = ledger_overrides {
             if !overrides.is_empty() {
-                let mut result = self
+                return self
                     .simulate_locally(contract_id, function_name, args, overrides)
-                    .await?;
-                if let Some(shadow) = shadow_config {
-                    result.protocol_impact =
-                        Some(self.compute_protocol_impact(&result.resources, &shadow));
-                }
-                return Ok(result);
+                    .await;
             }
         }
 
         let transaction_xdr = self.create_invoke_transaction(contract_id, function_name, args)?;
-        let mut result = self.simulate_transaction(&transaction_xdr).await?;
-
-        if let Some(shadow) = shadow_config {
-            result.protocol_impact = Some(self.compute_protocol_impact(&result.resources, &shadow));
-        }
-
-        Ok(result)
+        self.simulate_transaction(&transaction_xdr).await
     }
 
     /// Top-level simulate dispatcher: uses the provider registry when available,
@@ -441,7 +424,6 @@ impl SimulationEngine {
             latest_ledger: rpc_result.latest_ledger,
             cost_stroops,
             state_dependency: None,
-            protocol_impact: None,
         })
     }
 
@@ -500,7 +482,6 @@ impl SimulationEngine {
         total_bytes
     }
 
-    #[allow(clippy::only_used_in_recursion)]
     fn estimate_scval_size(&self, scval: &soroban_sdk::xdr::ScVal) -> u64 {
         use soroban_sdk::xdr::ScVal;
         match scval {
@@ -534,18 +515,10 @@ impl SimulationEngine {
     }
 
     fn calculate_cost(&self, resources: &SorobanResources) -> u64 {
-        network_config::protocol_21().calculate_cost(resources)
-    }
-
-    /// Compare the resource footprint against the baseline (Protocol 21) and
-    /// the caller-supplied shadow configuration.
-    fn compute_protocol_impact(
-        &self,
-        resources: &SorobanResources,
-        shadow: &NetworkConfig,
-    ) -> ProtocolImpact {
-        let baseline = network_config::protocol_21();
-        network_config::compare(resources, &baseline, shadow)
+        let cpu_cost = resources.cpu_instructions / 10000;
+        let ram_cost = resources.ram_bytes / 1024;
+        let ledger_cost = (resources.ledger_read_bytes + resources.ledger_write_bytes) / 1024;
+        cpu_cost + ram_cost + ledger_cost
     }
 
     /// Create invoke transaction for contract call
@@ -878,7 +851,7 @@ mod tests {
     async fn test_simulate_from_contract_id_empty() {
         let engine = SimulationEngine::new("https://test.com".to_string());
         let result = engine
-            .simulate_from_contract_id("", "test_function", vec![], None, None)
+            .simulate_from_contract_id("", "test_function", vec![], None)
             .await;
         assert!(matches!(result, Err(SimulationError::NodeError(_))));
     }
@@ -1070,7 +1043,6 @@ mod tests {
                 latest_ledger: 42,
                 cost_stroops: 10,
                 state_dependency: None,
-                protocol_impact: None,
             }
         }
 
